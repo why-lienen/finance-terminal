@@ -186,7 +186,7 @@ async function getGold() {
 }
 
 // ====== 路由入口 ======
-export function onRequest(context) {
+export async function onRequest(context) {
   const { request } = context;
 
   if (request.method === 'OPTIONS') {
