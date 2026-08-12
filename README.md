@@ -32,7 +32,7 @@
 npm run install:all      # 安装前后端依赖
 npm run dev              # 前端 5173 + 行情代理 3001
 ```
-打开 http://localhost:5173
+浏览器打开前端提示的本地地址（默认 http://localhost:5173）
 
 ## 部署（让别人也能访问）
 本项目是「纯静态前端 + 无状态行情代理」，可一键部署到 Vercel / Netlify / GitHub Pages：
