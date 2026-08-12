@@ -11,3 +11,7 @@ server/data/
 *.log
 dist/
 .DS_Store
+
+# vite 临时构建缓存
+*.timestamp-*.mjs
+vite.config.ts.timestamp-*.mjs
