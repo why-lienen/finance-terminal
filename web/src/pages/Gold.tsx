@@ -16,7 +16,7 @@ export default function Gold() {
     [],
   );
   const trend = usePolling(
-    () => getKline('113.Au99.99', 'day', 60).then((k) => (k.list || []).map((p) => ({ x: p.date.slice(0, 10), y: p.close }))),
+    () => getKline('1.518880', 'day', 60).then((k) => (k.list || []).map((p) => ({ x: p.date.slice(0, 10), y: Math.round(p.close * 100 * 100) / 100 }))),
     60000,
     [],
   );

@@ -278,14 +278,36 @@ async function getKline(secid, period = 'day', limit = 60) {
   }
 }
 
-// 股票/指数搜索（腾讯智能选股 smartbox，免 token，支持中文名/代码）
+// 股票/指数搜索：东方财富 suggest（按关键词过滤，JSON/UTF-8）为主，腾讯智能选股(GBK)兜底
 // 返回 [{code, secid, name, type}]，secid 形如 1.600519 / 0.002181
+const EM_SEARCH_TOKEN = 'D43BF722C8E5ADC0C3E1CEA6A1D6D2E5';
+
 async function getSearch(kw) {
   const key = 'search:' + kw;
   const cached = getCached(key);
   if (cached) return cached;
-  const url = `https://smartbox.gtimg.cn/s3/?t=all&q=${encodeURIComponent(kw)}`;
+
+  // 源1：东方财富 suggest（真正按关键词过滤，返回 Code/Name/MktNum）
   try {
+    const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(kw)}&type=14&token=${EM_SEARCH_TOKEN}`;
+    const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 1, 8000);
+    const json = JSON.parse(text);
+    const data = json?.QuotationCodeTable?.Data || [];
+    const list = data
+      .filter((d) => d && d.Code && d.Name)
+      .map((d) => {
+        const num = String(d.Code);
+        const market = String(d.MktNum) === '1' ? '1' : '0';
+        return { code: num, secid: market + '.' + num, name: d.Name, type: d.SecurityTypeName || '' };
+      });
+    if (list.length) { setCache(key, list, 5 * 60 * 1000); return list; }
+  } catch (e) {
+    console.error('[search] eastmoney suggest fail:', e.message);
+  }
+
+  // 源2：腾讯智能选股 v_hint（GBK，单条兜底，格式 sz~002181~粤传媒~ycm~GP-A）
+  try {
+    const url = `https://smartbox.gtimg.cn/s3/?t=all&q=${encodeURIComponent(kw)}`;
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://stockapp.finance.qq.com/' },
     });
@@ -295,66 +317,95 @@ async function getSearch(kw) {
     try {
       text = new TextDecoder('gbk').decode(buf);
     } catch (_) {
-      text = new TextDecoder('utf-8').decode(buf); // 极少数 Node 未带 full-icu 时的兜底
+      text = new TextDecoder('utf-8').decode(buf);
     }
-    const eq = text.indexOf('=');
-    if (eq < 0) return [];
-    const arrText = text.slice(eq + 1).trim().replace(/;$/, '');
-    const arr = JSON.parse(arrText);
-    const list = (Array.isArray(arr) ? arr : [])
-      .slice(0, 12)
-      .map((it) => {
-        const code = String(it.code || '');
-        const num = code.replace(/^[a-z]+/i, '');
-        if (!/^\d{6}$/.test(num)) return null;
-        const market = code.toLowerCase().startsWith('sh') ? '1' : '0';
-        return { code: num, secid: market + '.' + num, name: String(it.name || ''), type: String(it.type || '') };
-      })
-      .filter((x) => x && x.name);
-    setCache(key, list, 5 * 60 * 1000);
-    return list;
-  } catch (e) {
-    return [];
-  }
-}
-
-// 实时金价（元/克）：多源取数，任一有效即返回，最后兜底参考价
-// 源顺序：新浪 SGE AU9999（最新价 f[3]）> 东方财富 Au99.99 > 参考价
-async function getGold() {
-  const key = 'gold';
-  const cached = getCacheSoft(key);
-
-  // 源1：新浪 SGE AU9999（元/克，最新价在 f[3]）
-  try {
-    const res = await fetch('https://hq.sinajs.cn/list=AU9999', {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/' },
-    });
-    const txt = await res.text();
-    const m = txt.match(/var hq_str_AU9999="([^"]*)"/);
+    const m = text.match(/v_hint="([^"]*)"/);
     if (m && m[1]) {
-      const f = m[1].split(',');
-      const price = parseFloat(f[3]) || parseFloat(f[1]);
-      if (Number.isFinite(price) && price > 200 && price < 3000) {
-        const data = { price, code: 'AU9999', name: 'Au99.99(新浪SGE)', source: 'sina', stale: false };
-        setCache(key, data, 15000);
-        return data;
+      const f = m[1].split('~');
+      const mkt = (f[0] || '').toLowerCase();
+      const num = f[1];
+      const name = f[2];
+      if (num && /^\d{6}$/.test(num) && name) {
+        const market = mkt === 'sh' ? '1' : '0';
+        const list = [{ code: num, secid: market + '.' + num, name, type: '' }];
+        setCache(key, list, 5 * 60 * 1000);
+        return list;
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    console.error('[search] tencent fail:', e.message);
+  }
+  return [];
+}
 
-  // 源2：东方财富 上海金交所 Au99.99
+function cacheGold(data) {
+  setCache('gold', data, 15000);
+  return data;
+}
+
+// USD/CNY 汇率（缓存 1 小时，避免频繁请求第三方）
+async function getUsdCny() {
+  const key = 'usdcny';
+  const cached = getCached(key);
+  if (cached) return cached;
   try {
-    const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=113.Au99.99&fields=f43,f57,f58&fltt=2`;
-    const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 0, 5000);
-    const json = JSON.parse(text);
-    const d = json?.data;
-    const p = parseFloat(d?.f43);
-    if (d && Number.isFinite(p) && p > 200 && p < 3000) {
-      const data = { price: p, code: d.f57, name: d.f58 || 'Au99.99', source: 'eastmoney', stale: false };
-      setCache(key, data, 15000);
-      return data;
+    const j = await (await fetch('https://open.er-api.com/v6/latest/USD', { headers: { 'User-Agent': 'Mozilla/5.0' } })).json();
+    const rate = j?.rates?.CNY;
+    if (Number.isFinite(rate) && rate > 5 && rate < 10) {
+      setCache(key, rate, 60 * 60 * 1000);
+      return rate;
     }
-  } catch (_) {}
+  } catch (e) {
+    console.error('[fx] usdcny fail:', e.message);
+  }
+  return null;
+}
+
+// 实时金价（元/克）：伦敦金现货(USD/盎司) × USD/CNY 换算；失败则黄金ETF折算；最后参考价
+async function getGold() {
+  const cached = getCacheSoft('gold');
+
+  // 源1：腾讯 伦敦金现货 hf_XAU（USD/盎司）→ 元/克
+  try {
+    const txt = await fetchText('https://qt.gtimg.cn/q=hf_XAU', { Referer: 'https://gu.qq.com/' }, 1, 8000);
+    const m = txt.match(/v_hf_XAU="([^"]*)"/);
+    if (m && m[1]) {
+      const usdPerOz = parseFloat(m[1].split(',')[0]);
+      if (Number.isFinite(usdPerOz) && usdPerOz > 1000) {
+        const rate = await getUsdCny();
+        if (rate && rate > 5) {
+          const cnyPerGram = (usdPerOz / 31.1035) * rate;
+          if (cnyPerGram > 200 && cnyPerGram < 3000) {
+            return cacheGold({
+              price: Math.round(cnyPerGram * 100) / 100,
+              code: 'XAU',
+              name: '现货黄金(元/克)',
+              source: 'london+xau',
+              stale: false,
+              usd: usdPerOz,
+              rate,
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[gold] london fail:', e.message);
+  }
+
+  // 源2：黄金ETF 518880 价格 × 100（国内近似，元/克）
+  try {
+    const list = await getStocks(['1.518880']);
+    const p = list?.[0]?.price;
+    if (Number.isFinite(p) && p > 5) {
+      const cnyPerGram = p * 100;
+      if (cnyPerGram > 200 && cnyPerGram < 3000) {
+        return cacheGold({ price: Math.round(cnyPerGram * 100) / 100, code: '518880', name: 'Au99.99(ETF折算)', source: 'etf', stale: false });
+      }
+    }
+  } catch (e) {
+    console.error('[gold] etf fail:', e.message);
+  }
 
   // 兜底：返回上次成功值（若有）或参考价，并标记 stale
   return cached || { price: 560.0, name: 'Au99.99(参考价)', source: 'fallback', stale: true, note: '行情接口暂不可用，使用参考价' };
