@@ -6,7 +6,7 @@ import { useRealtimeMonitor } from '../hooks';
 import { cls, fmt, fmtPct } from '../utils';
 import Sparkline from '../components/Sparkline';
 import Modal from '../components/Modal';
-import { getAlert, setAlert, removeAlert, loadAlertLog, type AlertLogEntry } from '../store/alerts';
+import { getAlert, setAlert, removeAlert, loadAlerts, loadAlertLog, type AlertLogEntry } from '../store/alerts';
 import { ensureAudio, playAlertSound, setSoundEnabled } from '../alertAudio';
 import { canNotify, requestNotify, sendNotify, notifyPermission } from '../alertNotify';
 
