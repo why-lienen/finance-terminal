@@ -36,6 +36,11 @@ function getCached(key) {
   if (c && Date.now() - c.ts < c.ttl) return c.data;
   return null;
 }
+// 无视 TTL 读取最后一次缓存值（用于兜底时优先返回“上次真实值”而非写死参考价）
+function getCacheSoft(key) {
+  const c = cache.get(key);
+  return c ? c.data : null;
+}
 function setCache(key, data, ttl = CACHE_TTL) {
   cache.set(key, { ts: Date.now(), ttl, data });
 }
@@ -273,52 +278,86 @@ async function getKline(secid, period = 'day', limit = 60) {
   }
 }
 
-// 实时金价（元/克）：优先东方财富 Au99.99，其次新浪 SGE AU9999，最后兜底参考价
-async function getGold() {
-  const key = 'gold';
+// 股票/指数搜索（腾讯智能选股 smartbox，免 token，支持中文名/代码）
+// 返回 [{code, secid, name, type}]，secid 形如 1.600519 / 0.002181
+async function getSearch(kw) {
+  const key = 'search:' + kw;
   const cached = getCached(key);
   if (cached) return cached;
-  // 源1：东方财富上海金交所 Au99.99
+  const url = `https://smartbox.gtimg.cn/s3/?t=all&q=${encodeURIComponent(kw)}`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://stockapp.finance.qq.com/' },
+    });
+    if (!res.ok) throw new Error('http ' + res.status);
+    const buf = await res.arrayBuffer();
+    let text;
+    try {
+      text = new TextDecoder('gbk').decode(buf);
+    } catch (_) {
+      text = new TextDecoder('utf-8').decode(buf); // 极少数 Node 未带 full-icu 时的兜底
+    }
+    const eq = text.indexOf('=');
+    if (eq < 0) return [];
+    const arrText = text.slice(eq + 1).trim().replace(/;$/, '');
+    const arr = JSON.parse(arrText);
+    const list = (Array.isArray(arr) ? arr : [])
+      .slice(0, 12)
+      .map((it) => {
+        const code = String(it.code || '');
+        const num = code.replace(/^[a-z]+/i, '');
+        if (!/^\d{6}$/.test(num)) return null;
+        const market = code.toLowerCase().startsWith('sh') ? '1' : '0';
+        return { code: num, secid: market + '.' + num, name: String(it.name || ''), type: String(it.type || '') };
+      })
+      .filter((x) => x && x.name);
+    setCache(key, list, 5 * 60 * 1000);
+    return list;
+  } catch (e) {
+    return [];
+  }
+}
+
+// 实时金价（元/克）：多源取数，任一有效即返回，最后兜底参考价
+// 源顺序：新浪 SGE AU9999（最新价 f[3]）> 东方财富 Au99.99 > 参考价
+async function getGold() {
+  const key = 'gold';
+  const cached = getCacheSoft(key);
+
+  // 源1：新浪 SGE AU9999（元/克，最新价在 f[3]）
+  try {
+    const res = await fetch('https://hq.sinajs.cn/list=AU9999', {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/' },
+    });
+    const txt = await res.text();
+    const m = txt.match(/var hq_str_AU9999="([^"]*)"/);
+    if (m && m[1]) {
+      const f = m[1].split(',');
+      const price = parseFloat(f[3]) || parseFloat(f[1]);
+      if (Number.isFinite(price) && price > 200 && price < 3000) {
+        const data = { price, code: 'AU9999', name: 'Au99.99(新浪SGE)', source: 'sina', stale: false };
+        setCache(key, data, 15000);
+        return data;
+      }
+    }
+  } catch (_) {}
+
+  // 源2：东方财富 上海金交所 Au99.99
   try {
     const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=113.Au99.99&fields=f43,f57,f58&fltt=2`;
     const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 0, 5000);
     const json = JSON.parse(text);
     const d = json?.data;
-    if (d && d.f43 && !isNaN(parseFloat(d.f43))) {
-      const data = {
-        price: parseFloat(d.f43),
-        code: d.f57,
-        name: d.f58 || 'Au99.99',
-        source: 'eastmoney',
-        stale: false,
-      };
-      setCache(key, data);
+    const p = parseFloat(d?.f43);
+    if (d && Number.isFinite(p) && p > 200 && p < 3000) {
+      const data = { price: p, code: d.f57, name: d.f58 || 'Au99.99', source: 'eastmoney', stale: false };
+      setCache(key, data, 15000);
       return data;
     }
   } catch (_) {}
-  // 源2：新浪 SGE AU9999（元/克）
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
-    const res = await fetch('https://hq.sinajs.cn/list=AU9999', {
-      signal: ctrl.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/' },
-    });
-    const txt = await res.text();
-    clearTimeout(t);
-    const m = txt.match(/var hq_str_AU9999="([^"]*)"/);
-    if (m && m[1]) {
-      const f = m[1].split(',');
-      const price = parseFloat(f[1]) || parseFloat(f[2]);
-      if (Number.isFinite(price) && price > 0) {
-        const data = { price, code: 'AU9999', name: 'Au99.99(新浪)', source: 'sina', stale: false };
-        setCache(key, data);
-        return data;
-      }
-    }
-  } catch (_) {}
-  // 兜底：不缓存，避免长期锁定
+
+  // 兜底：返回上次成功值（若有）或参考价，并标记 stale
   return cached || { price: 560.0, name: 'Au99.99(参考价)', source: 'fallback', stale: true, note: '行情接口暂不可用，使用参考价' };
 }
 
-module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getGold };
+module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getGold, getSearch };

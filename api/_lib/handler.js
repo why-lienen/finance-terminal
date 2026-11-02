@@ -70,6 +70,12 @@ async function handler(req, res) {
       return send(res, 200, await quotes.getGold());
     }
 
+    if (path === '/api/market/search') {
+      const kw = (q.get('kw') || '').trim();
+      if (!kw) return send(res, 200, []);
+      return send(res, 200, await quotes.getSearch(kw));
+    }
+
     return send(res, 404, { error: 'not found', path });
   } catch (e) {
     return send(res, 500, { error: String((e && e.message) || e) });

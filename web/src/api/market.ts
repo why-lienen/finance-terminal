@@ -15,6 +15,16 @@ export function getStocks(secids: string[]) {
   return api.get<Stock[]>('/market/stocks?secids=' + secids.join(',')).then((r) => r.data);
 }
 
+export interface SearchResult {
+  code: string;
+  secid: string;
+  name: string;
+  type: string;
+}
+export function getSearch(kw: string) {
+  return api.get<SearchResult[]>('/market/search?kw=' + encodeURIComponent(kw)).then((r) => r.data);
+}
+
 export function getFundRank(ft: string, pn: number) {
   return api.get<FundRankRow[]>('/market/funds/rank?ft=' + ft + '&pn=' + pn).then((r) => r.data);
 }

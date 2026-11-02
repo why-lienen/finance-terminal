@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { getStocks, getKline } from '../api/market';
+import { useEffect, useRef, useState } from 'react';
+import { getStocks, getKline, getSearch, type SearchResult } from '../api/market';
 import { loadWatch, saveWatch } from '../store/local';
 import type { Stock, WatchItem } from '../types';
 import { cls, fmt, fmtPct } from '../utils';
@@ -46,9 +46,12 @@ function StockDetail({ secid, name }: { secid: string; name?: string }) {
 
 export default function Stocks() {
   const [watch, setWatch] = useState<WatchItem[]>([]);
-  const [secid, setSecid] = useState('');
-  const [name, setName] = useState('');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<{ secid: string; name: string } | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
 
   const { data: stocks, loading, error, reload } = usePolling<Record<string, Stock>>(
     async () => {
@@ -64,12 +67,45 @@ export default function Stocks() {
 
   useEffect(() => { setWatch(loadWatch()); }, []);
 
+  // 防抖搜索
+  useEffect(() => {
+    const kw = query.trim();
+    if (!kw) { setResults([]); setOpen(false); return; }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await getSearch(kw);
+        setResults(r);
+        setOpen(true);
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
   function add(sec: string, nm: string) {
     if (!sec) return;
+    if (loadWatch().some((x) => x.symbol === sec)) {
+      setQuery(''); setResults([]); setOpen(false);
+      return; // 已在自选，不重复加
+    }
     const w = loadWatch().filter((x) => x.symbol !== sec);
     w.push({ symbol: sec, type: 'stock', name: nm });
     saveWatch(w);
     setWatch(w);
+    setQuery(''); setResults([]); setOpen(false);
     reload();
   }
   function del(sym: string) {
@@ -82,11 +118,32 @@ export default function Stocks() {
 
   return (
     <div>
-      <div className="form">
-        <input placeholder="secid 如 1.600519" value={secid} onChange={(e) => setSecid(e.target.value)} />
-        <input placeholder="名称" value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="primary" onClick={() => { add(secid, name); setSecid(''); setName(''); }}>加自选</button>
-        <span className="muted">示例：</span>
+      <div className="search-box" ref={boxRef}>
+        <input
+          placeholder="搜索股票 / 指数，如 粤传媒、贵州茅台、600519"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => results.length && setOpen(true)}
+        />
+        {searching && <span className="muted search-hint">搜索中…</span>}
+        {open && results.length > 0 && (
+          <div className="search-dropdown">
+            {results.map((r) => (
+              <div key={r.secid} className="search-item" onClick={() => add(r.secid, r.name)}>
+                <span className="nm">{r.name}</span>
+                <span className="muted code">{r.code}</span>
+                <span className="muted secid">{r.secid}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {open && !searching && results.length === 0 && query.trim() && (
+          <div className="search-dropdown"><div className="muted" style={{ padding: 10 }}>无匹配结果，试试代码或简称</div></div>
+        )}
+      </div>
+
+      <div className="form" style={{ marginTop: 8 }}>
+        <span className="muted">快速添加：</span>
         {PRESET.map((p) => (
           <button key={p.symbol} onClick={() => add(p.symbol, p.name)}>{p.name}</button>
         ))}
@@ -116,7 +173,7 @@ export default function Stocks() {
             </tbody>
           </table>
         </div>
-        {!loading && stockWatch.length === 0 && <div className="muted">添加股票或指数（secid）查看行情，点击行看 K 线</div>}
+        {!loading && stockWatch.length === 0 && <div className="muted">搜索并添加股票 / 指数，点击行看 K 线</div>}
         {loading && stockWatch.length > 0 && <div className="muted">刷新中…</div>}
       </div>
 
