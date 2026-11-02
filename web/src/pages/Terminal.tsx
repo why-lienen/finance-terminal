@@ -129,9 +129,9 @@ export default function Terminal() {
       name: '国际金价',
       isGold: true,
       price: gold.price,
-      pct: null,
-      change: null,
-      sub: gold.source === 'london+xau' ? '伦敦金现货·元/克' : gold.name,
+      pct: gold.pct ?? null,
+      change: gold.change ?? null,
+      sub: gold.unit ? `伦敦金 XAU/USD · ${gold.unit}` : '伦敦金 XAU/USD',
       series: series[GOLD_KEY] || [],
       triggered: !!triggered[GOLD_KEY],
     });
@@ -288,6 +288,7 @@ export default function Terminal() {
 
 function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void }) {
   const key = card.key;
+  const unit = card.isGold ? '美元/盎司' : '';
   const existing = getAlert(key);
   const [upper, setUpper] = useState<string>(existing?.upper != null ? String(existing.upper) : '');
   const [lower, setLower] = useState<string>(existing?.lower != null ? String(existing.lower) : '');
@@ -331,9 +332,10 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
         <div className="muted" style={{ marginBottom: 8 }}>到价提醒（价格触及即弹窗+声音+系统通知）</div>
         <div className="form">
           <label>突破上限 ↑</label>
-          <input className="cell" type="number" step="0.01" placeholder="如 8.5" value={upper} onChange={(e) => setUpper(e.target.value)} />
+          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3950' : '如 8.5'} value={upper} onChange={(e) => setUpper(e.target.value)} />
           <label>跌破下限 ↓</label>
-          <input className="cell" type="number" step="0.01" placeholder="如 7.0" value={lower} onChange={(e) => setLower(e.target.value)} />
+          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3850' : '如 7.0'} value={lower} onChange={(e) => setLower(e.target.value)} />
+          {unit && <div className="muted" style={{ marginTop: 4 }}>单位：{unit}（与现价口径一致）</div>}
         </div>
         <div className="form" style={{ marginTop: 6 }}>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -414,6 +416,7 @@ function AlertCenter() {
             <span>
               {r.upper != null && <span className="up">↑{fmt(r.upper)} </span>}
               {r.lower != null && <span className="down">↓{fmt(r.lower)}</span>}
+              {key === GOLD_KEY && (r.upper != null || r.lower != null) && <span className="muted">美元/盎司</span>}
               {!r.enabled && <span className="muted">（已停用）</span>}
             </span>
           </div>

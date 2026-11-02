@@ -46,6 +46,10 @@ export interface Gold {
   source: string;
   stale: boolean;
   note?: string;
+  unit?: string; // 计价单位，如 '美元/盎司'
+  pct?: number; // 涨跌幅 %
+  change?: number; // 涨跌金额
+  prevClose?: number; // 昨收
 }
 
 export interface Holding {

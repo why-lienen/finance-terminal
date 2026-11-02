@@ -343,72 +343,41 @@ function cacheGold(data) {
   return data;
 }
 
-// USD/CNY 汇率（缓存 1 小时，避免频繁请求第三方）
-async function getUsdCny() {
-  const key = 'usdcny';
-  const cached = getCached(key);
-  if (cached) return cached;
-  try {
-    const j = await (await fetch('https://open.er-api.com/v6/latest/USD', { headers: { 'User-Agent': 'Mozilla/5.0' } })).json();
-    const rate = j?.rates?.CNY;
-    if (Number.isFinite(rate) && rate > 5 && rate < 10) {
-      setCache(key, rate, 60 * 60 * 1000);
-      return rate;
-    }
-  } catch (e) {
-    console.error('[fx] usdcny fail:', e.message);
-  }
-  return null;
-}
-
-// 实时金价（元/克）：伦敦金现货(USD/盎司) × USD/CNY 换算；失败则黄金ETF折算；最后参考价
+// 实时国际金价（腾讯伦敦金现货 hf_XAU，单位：美元/盎司）——按国际口径直接展示，不做国内换算
+// 字段：f[0]=现价(USD/oz) f[1]=涨跌幅% f[7]=昨收
 async function getGold() {
   const cached = getCacheSoft('gold');
 
-  // 源1：腾讯 伦敦金现货 hf_XAU（USD/盎司）→ 元/克
   try {
     const txt = await fetchText('https://qt.gtimg.cn/q=hf_XAU', { Referer: 'https://gu.qq.com/' }, 1, 8000);
     const m = txt.match(/v_hf_XAU="([^"]*)"/);
     if (m && m[1]) {
-      const usdPerOz = parseFloat(m[1].split(',')[0]);
-      if (Number.isFinite(usdPerOz) && usdPerOz > 1000) {
-        const rate = await getUsdCny();
-        if (rate && rate > 5) {
-          const cnyPerGram = (usdPerOz / 31.1035) * rate;
-          if (cnyPerGram > 200 && cnyPerGram < 3000) {
-            return cacheGold({
-              price: Math.round(cnyPerGram * 100) / 100,
-              code: 'XAU',
-              name: '现货黄金(元/克)',
-              source: 'london+xau',
-              stale: false,
-              usd: usdPerOz,
-              rate,
-            });
-          }
-        }
+      const f = m[1].split(',');
+      const price = parseFloat(f[0]); // 美元/盎司
+      const pct = parseFloat(f[1]); // 涨跌幅 %
+      const prevClose = parseFloat(f[7]); // 昨收
+      if (Number.isFinite(price) && price > 1000) {
+        const change = Number.isFinite(prevClose) ? Math.round((price - prevClose) * 100) / 100 : NaN;
+        return cacheGold({
+          price,
+          code: 'XAU',
+          name: '伦敦金 XAU/USD',
+          source: 'tencent',
+          stale: false,
+          unit: '美元/盎司',
+          pct: Number.isFinite(pct) ? pct : undefined,
+          change: Number.isFinite(change) ? change : undefined,
+          prevClose: Number.isFinite(prevClose) ? prevClose : undefined,
+        });
       }
     }
   } catch (e) {
-    console.error('[gold] london fail:', e.message);
+    console.error('[gold] tencent fail:', e.message);
   }
 
-  // 源2：黄金ETF 518880 价格 × 100（国内近似，元/克）
-  try {
-    const list = await getStocks(['1.518880']);
-    const p = list?.[0]?.price;
-    if (Number.isFinite(p) && p > 5) {
-      const cnyPerGram = p * 100;
-      if (cnyPerGram > 200 && cnyPerGram < 3000) {
-        return cacheGold({ price: Math.round(cnyPerGram * 100) / 100, code: '518880', name: 'Au99.99(ETF折算)', source: 'etf', stale: false });
-      }
-    }
-  } catch (e) {
-    console.error('[gold] etf fail:', e.message);
-  }
-
-  // 兜底：返回上次成功值（若有）或参考价，并标记 stale
-  return cached || { price: 560.0, name: 'Au99.99(参考价)', source: 'fallback', stale: true, note: '行情接口暂不可用，使用参考价' };
+  // 兜底：返回上次真实值（标记 stale），避免无数据时显示写死的参考价
+  if (cached) return { ...cached, stale: true, note: '实时接口暂不可用，显示最近一次数值' };
+  return { price: 0, name: '伦敦金 XAU/USD', code: 'XAU', source: 'none', stale: true, unit: '美元/盎司', note: '行情接口暂不可用' };
 }
 
 module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getGold, getSearch };
