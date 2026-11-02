@@ -28,3 +28,9 @@ export function loadWatch(): WatchItem[] {
 export function saveWatch(w: WatchItem[]) {
   localStorage.setItem(W_KEY, JSON.stringify(w));
 }
+
+export function upsertHolding(h: Holding) {
+  const list = loadHoldings().filter((x) => x.code !== h.code);
+  list.push(h);
+  saveHoldings(list);
+}

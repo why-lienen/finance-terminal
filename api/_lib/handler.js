@@ -1,6 +1,8 @@
-// Vercel Serverless Function —— 纯 Node 内置模块，零外部依赖（避免 Vercel 装包失败）
-// 无需 express/cors，用内置 http/url 实现路由与 CORS，最大程度兼容 Vercel 运行时。
-const quotes = require('./src/market/quotes');
+// 统一的请求入口（Vercel 函数 与 本地开发服务器共用）
+// 注意：这里只解析 req.url，必须由“能拿到完整原始路径”的入口调用：
+//   - Vercel: api/[...path].js（catch-all 函数，req.url 为 /api/market/...）
+//   - 本地:   api/_server.js（http 服务器，req.url 为完整路径）
+const quotes = require('./quotes');
 
 function send(res, status, data) {
   const body = JSON.stringify(data);
@@ -9,12 +11,12 @@ function send(res, status, data) {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
   });
   res.end(body);
 }
 
-module.exports = async function handler(req, res) {
-  // CORS 预检
+async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
 
   let path, q;
@@ -49,6 +51,21 @@ module.exports = async function handler(req, res) {
       return send(res, 200, await quotes.getFundRank(ft, pn));
     }
 
+    if (path === '/api/market/fund/history') {
+      const code = (q.get('code') || '').trim();
+      const range = q.get('range') || '1y';
+      if (!/^\d{6}$/.test(code)) return send(res, 400, { error: 'need 6-digit fund code' });
+      return send(res, 200, await quotes.getFundHistory(code, range));
+    }
+
+    if (path === '/api/market/stock/kline') {
+      const secid = (q.get('secid') || '').trim();
+      const period = q.get('period') || 'day';
+      const limit = parseInt(q.get('limit') || '60', 10);
+      if (!secid) return send(res, 400, { error: 'need secid' });
+      return send(res, 200, await quotes.getKline(secid, period, limit));
+    }
+
     if (path === '/api/market/gold') {
       return send(res, 200, await quotes.getGold());
     }
@@ -57,4 +74,7 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     return send(res, 500, { error: String((e && e.message) || e) });
   }
-};
+}
+
+module.exports = handler;
+module.exports.handler = handler;

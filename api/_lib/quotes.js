@@ -1,5 +1,8 @@
 // 公开行情接口代理 + 内存缓存 + 降级兜底（无状态，不依赖数据库）
+// 注意：本文件位于 api/_lib/ 下划线目录，Vercel 不会把它当作独立 Serverless Function 部署，
+// 而是作为 api/[...path].js 的依赖被打进同一个函数包。
 const CACHE_TTL = 30 * 1000;
+const HISTORY_TTL = 6 * 60 * 60 * 1000; // 历史净值/K线变化慢，缓存久一点
 const cache = new Map(); // key -> { ts, data }
 
 async function fetchText(url, headers = {}, retries = 2, timeout = 8000) {
@@ -30,11 +33,11 @@ async function fetchText(url, headers = {}, retries = 2, timeout = 8000) {
 
 function getCached(key) {
   const c = cache.get(key);
-  if (c && Date.now() - c.ts < CACHE_TTL) return c.data;
+  if (c && Date.now() - c.ts < c.ttl) return c.data;
   return null;
 }
-function setCache(key, data) {
-  cache.set(key, { ts: Date.now(), data });
+function setCache(key, data, ttl = CACHE_TTL) {
+  cache.set(key, { ts: Date.now(), ttl, data });
 }
 
 // 股票/指数行情：腾讯 qt.gtimg.cn 为主源（稳定、GBK 解码），东方财富 push2 兜底
@@ -160,7 +163,8 @@ async function getFundEst(code) {
   }
 }
 
-// 基金排行（东方财富 fundapi，jsonp: var rankData = {...}），字段已升级为 data1
+// 基金排行（东方财富 fundapi）。标准列序：
+// 0代码 1名称 2类型 3日期 4单位净值 5累计净值 6日涨幅 7近1周 8近1月 9近3月 10近6月 11近1年 12近2年 13近3年 14今年来 15成立来
 async function getFundRank(ft = 'all', pn = 20) {
   const key = `fundrank:${ft}:${pn}`;
   const cached = getCached(key);
@@ -170,7 +174,7 @@ async function getFundRank(ft = 'all', pn = 20) {
     const text = await fetchText(url, { Referer: 'https://fundf10.eastmoney.com/' });
     const m = text.match(/var rankData\s*=\s*(\{[\s\S]*?\});/);
     if (!m) throw new Error('no match');
-    const obj = (new Function('return ' + m[1]))();
+    const obj = JSON.parse(m[1]); // 直接 JSON.parse，比 new Function 更安全
     const datas = obj.data1 || obj.datas || [];
     const list = datas.map((row) => {
       const r = String(row).split('|');
@@ -182,11 +186,18 @@ async function getFundRank(ft = 'all', pn = 20) {
         code: r[0],
         name: r[1],
         type: r[2],
-        net: num(4), // 单位净值
-        day: num(5), // 日涨幅
-        week: num(6), // 近1周
-        month: num(7), // 近1月
-        year: num(10) || num(11), // 近1年(空则退回近2年)
+        date: r[3] || null,
+        net: num(4),
+        acc: num(5),
+        day: num(6),
+        week: num(7),
+        month: num(8),
+        quarter: num(9),
+        half: num(10),
+        year: num(11),
+        y2: num(12),
+        ytd: num(14),
+        total: num(15),
       };
     });
     setCache(key, list);
@@ -196,12 +207,78 @@ async function getFundRank(ft = 'all', pn = 20) {
   }
 }
 
+// 基金净值历史（东方财富 f10/lsjz），返回 [{date, nav, acc}]
+async function getFundHistory(code, range = '1y') {
+  const sizeMap = { '1m': 30, '3m': 90, '6m': 180, '1y': 365, '3y': 1095 };
+  const pn = sizeMap[range] || 365;
+  const key = `fundhist:${code}:${range}`;
+  const cached = getCached(key);
+  if (cached) return cached;
+  const url = `https://api.fund.eastmoney.com/f10/lsjz?callback=&fundCode=${code}&pageIndex=1&pageSize=${pn}&_=${Date.now()}`;
+  try {
+    const text = await fetchText(url, {
+      Referer: `https://fundf10.eastmoney.com/F10/jjjz_${code}.html`,
+      'Accept': 'application/json',
+    });
+    const json = JSON.parse(text);
+    const rows = json?.Data?.LSJZList || [];
+    // 接口默认最新在前，翻转为时间升序
+    const list = rows
+      .map((r) => ({
+        date: String(r.FSRQ || '').slice(0, 10),
+        nav: parseFloat(r.DWJZ),
+        acc: parseFloat(r.LJJZ),
+      }))
+      .filter((x) => x.date && Number.isFinite(x.nav))
+      .reverse();
+    setCache(key, list, HISTORY_TTL);
+    return list;
+  } catch (e) {
+    return getCached(key) || [];
+  }
+}
+
+// K线（东方财富 push2his）：股票/指数/黄金通用，secid 如 1.600519 / 113.Au99.99
+// period: day=101 week=102 month=103；返回 [{date, open, close, high, low, vol}]
+async function getKline(secid, period = 'day', limit = 60) {
+  const kltMap = { day: 101, week: 102, month: 103, '60m': 61, '30m': 31, '15m': 21, '5m': 5 };
+  const klt = kltMap[period] || 101;
+  const key = `kline:${secid}:${period}:${limit}`;
+  const cached = getCached(key);
+  if (cached) return cached;
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}` +
+    `&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58&klt=${klt}&fqt=0&end=20500101&lmt=${limit}`;
+  try {
+    const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 1, 8000);
+    const json = JSON.parse(text);
+    const klines = json?.data?.klines || [];
+    const name = json?.data?.name || '';
+    const code = json?.data?.code || secid;
+    const list = klines.map((s) => {
+      const p = String(s).split(',');
+      return {
+        date: p[0],
+        open: parseFloat(p[1]),
+        close: parseFloat(p[2]),
+        high: parseFloat(p[3]),
+        low: parseFloat(p[4]),
+        vol: parseFloat(p[5]),
+      };
+    });
+    const data = { code, name, period, list };
+    setCache(key, data, HISTORY_TTL);
+    return data;
+  } catch (e) {
+    return getCached(key) || { code: secid, name: '', period, list: [] };
+  }
+}
+
 // 实时金价（元/克）：优先东方财富 Au99.99，其次新浪 SGE AU9999，最后兜底参考价
 async function getGold() {
   const key = 'gold';
   const cached = getCached(key);
   if (cached) return cached;
-  // 源1：东方财富上海金交所 Au99.99（本环境常被拦截，快速失败走兜底）
+  // 源1：东方财富上海金交所 Au99.99
   try {
     const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=113.Au99.99&fields=f43,f57,f58&fltt=2`;
     const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 0, 5000);
@@ -244,4 +321,4 @@ async function getGold() {
   return cached || { price: 560.0, name: 'Au99.99(参考价)', source: 'fallback', stale: true, note: '行情接口暂不可用，使用参考价' };
 }
 
-module.exports = { getStocks, getFundEst, getFundRank, getGold };
+module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getGold };

@@ -25,11 +25,18 @@ export interface FundRankRow {
   code: string;
   name: string;
   type: string;
+  date?: string | null;
   net: number;
+  acc: number;
   day: number;
   week: number;
   month: number;
+  quarter: number;
+  half: number;
   year: number;
+  y2: number;
+  ytd: number;
+  total: number;
 }
 
 export interface Gold {
@@ -79,4 +86,9 @@ export interface WatchItem {
   symbol: string;
   type: string;
   name?: string;
+}
+
+export interface ChartPoint {
+  x: string;
+  y: number;
 }

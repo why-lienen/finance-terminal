@@ -18,3 +18,15 @@ export function getStocks(secids: string[]) {
 export function getFundRank(ft: string, pn: number) {
   return api.get<FundRankRow[]>('/market/funds/rank?ft=' + ft + '&pn=' + pn).then((r) => r.data);
 }
+
+export function getFundHistory(code: string, range = '1y') {
+  return api.get<{ date: string; nav: number; acc: number }[]>('/market/fund/history?code=' + code + '&range=' + range).then((r) => r.data);
+}
+
+export function getKline(secid: string, period = 'day', limit = 60) {
+  return api
+    .get<{ code: string; name: string; period: string; list: { date: string; open: number; close: number; high: number; low: number; vol: number }[] }>(
+      '/market/stock/kline?secid=' + secid + '&period=' + period + '&limit=' + limit,
+    )
+    .then((r) => r.data);
+}

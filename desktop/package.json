@@ -1,0 +1,15 @@
+{
+  "name": "finance-terminal-menubar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "金融终端 · macOS 顶部菜单栏版本（Electron，无图标资源依赖）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-packager . finance-terminal --platform=darwin --arch=arm64 --overwrite --electron-zip-dir=./.cache"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-packager": "^18.3.0"
+  }
+}
