@@ -15,27 +15,29 @@
 //   - 加载的是线上已部署地址（?bar=1 让网页只渲染顶部滚动行情条）。
 //     想离线/隐私，可把 APP_URL 指向本地 `npm run dev` 后的地址，
 //     并确保本地 api 代理（npm run dev 的 3001）一并运行。
-const { app, BrowserWindow, Tray, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Tray, nativeImage, screen, Menu } = require('electron');
 
+// 加载盯盘终端（首页即 Terminal），菜单栏里常驻盯盘 + 系统级到价提醒
 const APP_URL =
   process.env.APP_URL ||
-  'https://finance-terminal-ap66zd7cr-noah-ee76.vercel.app/?bar=1';
+  'https://finance-terminal-ap66zd7cr-noah-ee76.vercel.app/';
 
 let win = null;
 let tray = null;
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 460,
-    height: 300,
+    width: 480,
+    height: 680,
     show: false, // 默认隐藏，点菜单栏再展开
     frame: false,
-    resizable: false,
+    resizable: true,
     alwaysOnTop: true,
     skipTaskbar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      backgroundThrottling: false, // 关键：窗口隐藏后也不降速，保证 5s 轮询与到价提醒持续运行
     },
   });
   win.loadURL(APP_URL);
@@ -59,8 +61,8 @@ app.whenReady().then(() => {
   createWindow();
 
   tray = new Tray(nativeImage.createEmpty());
-  tray.setTitle('📈 金融终端');
-  tray.setToolTip('金融终端 · 点击展开行情');
+  tray.setTitle('📈 盯盘');
+  tray.setToolTip('我的盯盘终端 · 点击展开');
   tray.on('click', () => {
     if (!win) return;
     if (win.isVisible()) {
@@ -71,6 +73,13 @@ app.whenReady().then(() => {
       win.focus();
     }
   });
+  // 右键菜单
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '打开终端', click: () => { positionWindow(); win.show(); win.focus(); } },
+      { label: '退出', click: () => app.quit() },
+    ]),
+  );
 });
 
 // 阻止默认退出，保持菜单栏常驻

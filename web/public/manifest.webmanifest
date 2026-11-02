@@ -1,0 +1,13 @@
+{
+  "name": "我的盯盘终端",
+  "short_name": "盯盘",
+  "description": "专属股票与国际金价实时盯盘终端，到价提醒",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0c10",
+  "theme_color": "#0a0c10",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

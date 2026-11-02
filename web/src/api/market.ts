@@ -15,6 +15,12 @@ export function getStocks(secids: string[]) {
   return api.get<Stock[]>('/market/stocks?secids=' + secids.join(',')).then((r) => r.data);
 }
 
+// 实时盯盘合并接口：一次拿回 国际金价 + 全部自选标的
+export function getMonitor(secids: string[]) {
+  const qs = secids.length ? '?secids=' + secids.join(',') : '';
+  return api.get<{ gold: Gold | null; stocks: Stock[] }>('/market/monitor' + qs).then((r) => r.data);
+}
+
 export interface SearchResult {
   code: string;
   secid: string;

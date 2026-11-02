@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import Bar from '../pages/Bar';
 
 const tabs = [
-  ['/', '总看板'],
+  ['/', '盯盘'],
   ['/stocks', '股票'],
   ['/funds', '基金'],
   ['/gold', '黄金'],

@@ -37,6 +37,16 @@ async function handler(req, res) {
       return send(res, 200, await quotes.getStocks(secids));
     }
 
+    // 实时盯盘合并接口：一次返回 国际金价 + 全部自选标的，减少 5s 轮询的请求数
+    if (path === '/api/market/monitor') {
+      const secids = (q.get('secids') || '').split(',').filter(Boolean);
+      const [g, s] = await Promise.all([
+        quotes.getGold(),
+        secids.length ? quotes.getStocks(secids) : Promise.resolve([]),
+      ]);
+      return send(res, 200, { gold: g, stocks: s });
+    }
+
     if (path === '/api/market/fund/estimate') {
       const code = (q.get('code') || '').trim();
       if (!/^\d{6}$/.test(code)) return send(res, 400, { error: 'need 6-digit fund code' });
