@@ -12,7 +12,7 @@ export default function Modal({ open, title, onClose, children }: Props) {
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 50,
+        position: 'fixed', inset: 0, background: 'rgba(20,28,42,.45)', zIndex: 50,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
       }}
       onClick={onClose}
