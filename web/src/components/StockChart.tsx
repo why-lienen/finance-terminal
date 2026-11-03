@@ -99,7 +99,7 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid: st
       )}
       {err && <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>{err}</div>}
       {!loading && !err && isIntraday && <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} />}
-      {!loading && !err && !isIntraday && <KlineView data={kline} />}
+      {!loading && !err && !isIntraday && <KlineView data={kline} period={period} />}
     </div>
   );
 }
@@ -200,7 +200,17 @@ function IntradayView({ data, prevClose, five }: { data: IntradayPoint[]; prevCl
   );
 }
 
-function KlineView({ data }: { data: KP[] }) {
+function KlineView({ data, period }: { data: KP[]; period: Period }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inited = useRef(false);
+  const isMinute = period === '1分钟';
+  // 分钟级默认滚动到最新一根（盯盘看最新），仅首次初始化，避免刷新时抢走用户滚动位置
+  useEffect(() => {
+    if (isMinute && scrollRef.current && !inited.current && data.length) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      inited.current = true;
+    }
+  }, [isMinute, data.length]);
   if (!data.length) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>暂无K线数据</div>;
   const W = 680;
   const H = 300;
@@ -211,18 +221,21 @@ function KlineView({ data }: { data: KP[] }) {
   const volH = 54;
   const gap = 10;
   const priceH = H - padT - padB - volH - gap;
-  const innerW = W - padL - padR;
-  // 蜡烛过多时只显示最近 N 根，保证蜡烛可见（1分钟一屏约3小时）
+  // 分钟级：保留全部 K 线，固定蜡烛宽度 + 横向滚动（每根清晰可见）；其它周期：自动适配取最近 N 根
   const N = 220;
-  const view = data.length > N ? data.slice(data.length - N) : data;
+  const view = isMinute ? data : data.length > N ? data.slice(data.length - N) : data;
   const n = view.length;
+  const STRIDE = 7; // 分钟级每根蜡烛占宽(px)
   const allLo = Math.min(...data.map((d) => d.low));
   const allHi = Math.max(...data.map((d) => d.high));
   const pad = (allHi - allLo) * 0.06;
   const L = allLo - pad;
   const U = allHi + pad;
   const span = U - L || 1;
-  const xOf = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const innerW = isMinute ? n * STRIDE : W - padL - padR;
+  const plotW = isMinute ? padL + innerW + padR : W;
+  const xOf = (i: number) =>
+    isMinute ? padL + i * STRIDE + STRIDE / 2 : padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yOf = (v: number) => padT + priceH - ((v - L) / span) * priceH;
   const closes = data.map((d) => d.close);
   const ma5 = sma(closes, 5);
@@ -238,55 +251,71 @@ function KlineView({ data }: { data: KP[] }) {
   const up = view[n - 1].close >= view[0].close;
   const stroke = up ? C.up : C.down;
   const ticks = [0, 0.5, 1].map((k) => L + span * k);
-  const xticks = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].filter(
-    (v, i, a) => a.indexOf(v) === i,
-  );
-  const candleW = Math.max(1.5, (innerW / n) * 0.62);
+  let xticks: number[];
+  if (isMinute) {
+    const step = Math.max(1, Math.ceil(n / 9));
+    xticks = [];
+    for (let i = 0; i < n; i += step) xticks.push(i);
+    if (xticks[xticks.length - 1] !== n - 1) xticks.push(n - 1);
+  } else {
+    xticks = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].filter(
+      (v, i, a) => a.indexOf(v) === i,
+    );
+  }
+  const candleW = isMinute ? Math.max(3, STRIDE * 0.6) : Math.max(1.8, (innerW / n) * 0.62);
+  const labelFmt = (s: string) => (isMinute ? s.slice(11, 16) : s.slice(5));
   const maLast = (arr: (number | null)[]) => {
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i] as number;
     return null;
   };
   return (
     <div className="chart-wrap chart-plot">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="K线走势">
-        {ticks.map((tv, k) => (
-          <g key={k}>
-            <line x1={padL} y1={yOf(tv)} x2={padL + innerW} y2={yOf(tv)} stroke={C.grid} strokeWidth={1} strokeDasharray="3 4" />
-            <text x={padL + innerW + 6} y={yOf(tv) + 4} fill={C.text} fontSize="10">{fmt(tv)}</text>
-          </g>
-        ))}
-        {/* 蜡烛：实体 open→close，影线 high→low（A股：涨红跌绿） */}
-        {view.map((d, i) => {
-          const x = xOf(i);
-          const yO = yOf(d.open);
-          const yC = yOf(d.close);
-          const yH = yOf(d.high);
-          const yL = yOf(d.low);
-          const isUp = d.close >= d.open;
-          const col = isUp ? C.up : C.down;
-          const top = Math.min(yO, yC);
-          const h = Math.max(1, Math.abs(yC - yO));
-          return (
-            <g key={i}>
-              <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={1} />
-              <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={col} />
+      {isMinute && (
+        <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
+          1分钟走势 · 共 {n} 根（可左右滑动查看全天）
+        </div>
+      )}
+      <div ref={scrollRef} style={isMinute ? { overflowX: 'auto', maxWidth: '100%', paddingBottom: 4 } : undefined}>
+        <svg width={isMinute ? plotW : '100%'} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="K线走势">
+          {ticks.map((tv, k) => (
+            <g key={k}>
+              <line x1={padL} y1={yOf(tv)} x2={padL + innerW} y2={yOf(tv)} stroke={C.grid} strokeWidth={1} strokeDasharray="3 4" />
+              <text x={padL + innerW + 6} y={yOf(tv) + 4} fill={C.text} fontSize="10">{fmt(tv)}</text>
             </g>
-          );
-        })}
-        <polyline points={linePts(ma5v)} fill="none" stroke={C.ma5} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
-        <polyline points={linePts(ma10v)} fill="none" stroke={C.ma10} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
-        <polyline points={linePts(ma20v)} fill="none" stroke={C.ma20} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
-        {view.map((d, i) => {
-          const x = xOf(i);
-          const y = yVol(d.vol);
-          const hgt = padT + priceH + gap + volH - y;
-          const col = d.close >= d.open ? C.up : C.down;
-          return <rect key={i} x={x - candleW / 2} y={y} width={candleW} height={Math.max(0, hgt)} fill={col} opacity={0.45} />;
-        })}
-        {xticks.map((i) => (
-          <text key={i} x={xOf(i)} y={H - 6} fill={C.text} fontSize="10" textAnchor="middle">{view[i].date.slice(5)}</text>
-        ))}
-      </svg>
+          ))}
+          {/* 蜡烛：实体 open→close，影线 high→low（A股：涨红跌绿） */}
+          {view.map((d, i) => {
+            const x = xOf(i);
+            const yO = yOf(d.open);
+            const yC = yOf(d.close);
+            const yH = yOf(d.high);
+            const yL = yOf(d.low);
+            const isUp = d.close >= d.open;
+            const col = isUp ? C.up : C.down;
+            const top = Math.min(yO, yC);
+            const h = Math.max(1, Math.abs(yC - yO));
+            return (
+              <g key={i}>
+                <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={1} />
+                <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={col} />
+              </g>
+            );
+          })}
+          <polyline points={linePts(ma5v)} fill="none" stroke={C.ma5} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+          <polyline points={linePts(ma10v)} fill="none" stroke={C.ma10} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+          <polyline points={linePts(ma20v)} fill="none" stroke={C.ma20} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+          {view.map((d, i) => {
+            const x = xOf(i);
+            const y = yVol(d.vol);
+            const hgt = padT + priceH + gap + volH - y;
+            const col = d.close >= d.open ? C.up : C.down;
+            return <rect key={i} x={x - candleW / 2} y={y} width={candleW} height={Math.max(0, hgt)} fill={col} opacity={0.45} />;
+          })}
+          {xticks.map((i) => (
+            <text key={i} x={xOf(i)} y={H - 6} fill={C.text} fontSize="10" textAnchor="middle">{labelFmt(view[i].date)}</text>
+          ))}
+        </svg>
+      </div>
       <div className="chart-legend">
         <span style={{ color: C.ma5 }}>MA5 {maLast(ma5v) != null ? fmt(maLast(ma5v) as number) : '—'}</span>
         <span style={{ color: C.ma10 }}>MA10 {maLast(ma10v) != null ? fmt(maLast(ma10v) as number) : '—'}</span>
