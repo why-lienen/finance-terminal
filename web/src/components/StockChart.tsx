@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { getIntraday, getKline, type IntradayPoint } from '../api/market';
+import { getIntraday, getKline, getGoldIntraday, getGoldKline, type IntradayPoint } from '../api/market';
 import { fmt } from '../utils';
 
-type Period = '分时' | '五日' | '日K' | '周K' | '月K';
-const PERIODS: Period[] = ['分时', '五日', '日K', '周K', '月K'];
+type Period = '分时' | '五日' | '1分钟' | '日K' | '周K' | '月K';
+const PERIODS: Period[] = ['分时', '五日', '1分钟', '日K', '周K', '月K'];
 
 interface KP {
   date: string;
@@ -36,7 +36,7 @@ function sma(values: number[], n: number): (number | null)[] {
   });
 }
 
-export default function StockChart({ secid, name, prevClose }: { secid: string; name?: string; prevClose?: number }) {
+export default function StockChart({ secid, name, prevClose, gold }: { secid: string; name?: string; prevClose?: number; gold?: boolean }) {
   const [period, setPeriod] = useState<Period>('分时');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -54,11 +54,18 @@ export default function StockChart({ secid, name, prevClose }: { secid: string; 
       setErr(null);
       try {
         if (isIntraday) {
-          const d = await getIntraday(secid, period === '五日' ? 5 : 1);
+          const d = gold
+            ? await getGoldIntraday(period === '五日' ? 5 : 1)
+            : await getIntraday(secid, period === '五日' ? 5 : 1);
           if (!cancelled && id === reqId.current) setIntraday(d.list || []);
         } else {
-          const map: Record<string, 'day' | 'week' | 'month'> = { 日K: 'day', 周K: 'week', 月K: 'month' };
-          const d = await getKline(secid, map[period], 120);
+          const map: Record<string, 'day' | 'week' | 'month' | '1min'> = {
+            日K: 'day',
+            周K: 'week',
+            月K: 'month',
+            '1分钟': '1min',
+          };
+          const d = gold ? await getGoldKline(map[period], 300) : await getKline(secid, map[period], 120);
           if (!cancelled && id === reqId.current) setKline(d.list || []);
         }
       } catch (e: any) {
@@ -74,7 +81,7 @@ export default function StockChart({ secid, name, prevClose }: { secid: string; 
       cancelled = true;
       clearInterval(timer);
     };
-  }, [secid, period]);
+  }, [secid, period, gold]);
 
   const isIntraday = period === '分时' || period === '五日';
 

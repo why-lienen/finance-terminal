@@ -317,8 +317,6 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
     sendNotify(`🔔 ${card.name} 测试提醒`, `这是一条测试通知（现价 ${fmt(card.price ?? 0)}）`);
   }
 
-  const chartSeries = (card.series || []).map((y, i) => ({ x: '', y }));
-
   return (
     <div>
       <div className="form" style={{ marginBottom: 12 }}>
@@ -328,11 +326,9 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
 
       {card.isGold ? (
         <>
-          <div className="chart-card">
-            <LineChartInline series={chartSeries} />
-          </div>
+          <StockChart gold name="COMEX黄金（国际金价）" />
           <div className="muted" style={{ marginTop: 4 }}>
-            国际金价历史免费数据源不可用，此处为实时滚动曲线（约 30 分钟，每 5 秒刷新）
+            走势图数据源：COMEX 黄金期货连续（与伦敦金现货同价，美元/盎司）。实时价见上方「现价」。
           </div>
         </>
       ) : (
@@ -360,73 +356,6 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
           {existing && <button className="danger" onClick={delRule}>删除预警</button>}
         </div>
       </div>
-    </div>
-  );
-}
-
-function LineChartInline({ series }: { series: { x: string; y: number }[] }) {
-  // 轻量内联图，避免引入大依赖；复用 CSS 变量配色
-  // 风格参考：白底绘图区 + 清晰红/绿价格线 + 右侧价格轴 + 当前价标签 + 底部时间轴
-  const W = 680;
-  const H = 240;
-  const padT = 16;
-  const padB = 26;
-  const padL = 12;
-  const padR = 54;
-  if (!series || series.length < 2) {
-    return <div className="muted" style={{ padding: '48px 0', textAlign: 'center' }}>实时数据累积中…（约 10 秒后出图）</div>;
-  }
-  const ys = series.map((s) => s.y);
-  let min = Math.min(...ys);
-  let max = Math.max(...ys);
-  if (min === max) {
-    min -= 1;
-    max += 1;
-  }
-  const span = max - min || 1;
-  const innerH = H - padT - padB;
-  const innerW = W - padL - padR;
-  const n = series.length;
-  const xOf = (i: number) => padL + (i / (n - 1)) * innerW;
-  const yOf = (v: number) => padT + innerH - ((v - min) / span) * innerH;
-  const up = series[n - 1].y >= series[0].y;
-  const stroke = up ? 'var(--up)' : 'var(--down)';
-  const pts = series.map((s, i) => `${xOf(i).toFixed(1)},${yOf(s.y).toFixed(1)}`).join(' ');
-  const area = `${padL},${padT + innerH} ${pts} ${padL + innerW},${padT + innerH}`;
-  const gid = 'lg' + Math.random().toString(36).slice(2, 8);
-  const last = series[n - 1].y;
-  const ticks = [0, 1, 2, 3].map((k) => min + (span * k) / 3);
-  const now = Date.now();
-  const startT = new Date(now - (n - 1) * 5000);
-  const fmtT = (d: Date) => d.toLocaleTimeString('zh-CN', { hour12: false });
-  return (
-    <div className="chart-wrap chart-plot">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="实时走势">
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.22" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {/* 网格 + 右侧价格轴 */}
-        {ticks.map((tv, k) => (
-          <g key={k}>
-            <line x1={padL} y1={yOf(tv)} x2={padL + innerW} y2={yOf(tv)} stroke="var(--border)" strokeWidth={1} strokeDasharray="3 4" />
-            <text x={padL + innerW + 8} y={yOf(tv) + 4} fill="var(--text-faint)" fontSize="11" textAnchor="start">{fmt(tv)}</text>
-          </g>
-        ))}
-        {/* 面积 + 折线 */}
-        <polygon points={area} fill={`url(#${gid})`} />
-        <polyline points={pts} fill="none" stroke={stroke} strokeWidth={2.4} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-        {/* 当前价虚线 + 标签 */}
-        <line x1={padL} y1={yOf(last)} x2={padL + innerW} y2={yOf(last)} stroke={stroke} strokeWidth={1} strokeDasharray="5 4" opacity={0.7} />
-        <rect x={padL + innerW + 2} y={yOf(last) - 10} width={padR - 8} height={20} rx={5} fill={stroke} />
-        <text x={padL + innerW + (padR) / 2} y={yOf(last) + 4} fill="#fff" fontSize="11" fontWeight={700} textAnchor="middle">{fmt(last)}</text>
-        <circle cx={xOf(n - 1)} cy={yOf(last)} r={3.5} fill={stroke} stroke="#fff" strokeWidth={1.5} />
-        {/* 时间轴 */}
-        <text x={padL} y={H - 7} fill="var(--text-faint)" fontSize="11">{fmtT(startT)}</text>
-        <text x={padL + innerW} y={H - 7} fill="var(--text-faint)" fontSize="11" textAnchor="end">现在</text>
-      </svg>
     </div>
   );
 }

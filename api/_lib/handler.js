@@ -87,6 +87,18 @@ async function handler(req, res) {
       return send(res, 200, await quotes.getGold());
     }
 
+    // 国际金价历史走势：用 COMEX 黄金期货连续(101.GC00Y) 作为国际金价的历史数据源
+    // （与实时显示的伦敦金现货同价，美元/盎司）。支持分时/五日/日K/周K/月K/1分钟。
+    if (path === '/api/market/gold/intraday') {
+      const days = parseInt(q.get('days') || '1', 10);
+      return send(res, 200, await quotes.getIntraday('101.GC00Y', days));
+    }
+    if (path === '/api/market/gold/kline') {
+      const period = q.get('period') || 'day';
+      const limit = parseInt(q.get('limit') || '120', 10);
+      return send(res, 200, await quotes.getKline('101.GC00Y', period, limit));
+    }
+
     if (path === '/api/market/search') {
       const kw = (q.get('kw') || '').trim();
       if (!kw) return send(res, 200, []);

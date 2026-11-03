@@ -60,3 +60,19 @@ export function getIntraday(secid: string, days = 1) {
     )
     .then((r) => r.data);
 }
+
+// 国际金价历史走势：COMEX 黄金期货连续（与伦敦金同价，美元/盎司）
+export function getGoldIntraday(days = 1) {
+  return api
+    .get<{ code: string; name: string; days: number; list: IntradayPoint[] }>(
+      '/market/gold/intraday?days=' + days,
+    )
+    .then((r) => r.data);
+}
+export function getGoldKline(period = 'day', limit = 120) {
+  return api
+    .get<{ code: string; name: string; period: string; list: { date: string; open: number; close: number; high: number; low: number; vol: number }[] }>(
+      '/market/gold/kline?period=' + period + '&limit=' + limit,
+    )
+    .then((r) => r.data);
+}

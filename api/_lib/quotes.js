@@ -246,7 +246,7 @@ async function getFundHistory(code, range = '1y') {
 // K线（东方财富 push2his）：股票/指数/黄金通用，secid 如 1.600519 / 113.Au99.99
 // period: day=101 week=102 month=103；返回 [{date, open, close, high, low, vol}]
 async function getKline(secid, period = 'day', limit = 60) {
-  const kltMap = { day: 101, week: 102, month: 103, '60m': 61, '30m': 31, '15m': 21, '5m': 5 };
+  const kltMap = { day: 101, week: 102, month: 103, '1min': 1, '5m': 5, '15m': 21, '30m': 31, '60m': 61 };
   const klt = kltMap[period] || 101;
   const key = `kline:${secid}:${period}:${limit}`;
   const cached = getCached(key);
