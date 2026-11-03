@@ -191,6 +191,8 @@ button.danger:hover { background: var(--up); color: #fff; }
 .range-tabs { display: inline-flex; gap: 4px; }
 .range-tabs button { padding: 4px 10px; font-size: 12px; font-weight: 600; }
 .range-tabs button.active { background: var(--accent); color: #1a1205; border: none; }
+.minute-switch .seg { padding: 2px 9px; font-size: 11px; font-weight: 600; line-height: 1.4; border: 1px solid var(--border); background: #fff; color: var(--text-dim); border-radius: 6px; cursor: pointer; }
+.minute-switch .seg.on { background: var(--accent); color: #1a1205; border-color: var(--accent); }
 
 /* ===== 骨架屏 ===== */
 .skeleton {

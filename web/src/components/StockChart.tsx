@@ -42,6 +42,7 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid: st
   const [err, setErr] = useState<string | null>(null);
   const [intraday, setIntraday] = useState<IntradayPoint[]>([]);
   const [kline, setKline] = useState<KP[]>([]);
+  const [minuteSpan, setMinuteSpan] = useState<'recent' | 'all'>('recent'); // 1分钟默认近1.5h
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -99,7 +100,7 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid: st
       )}
       {err && <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>{err}</div>}
       {!loading && !err && isIntraday && <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} />}
-      {!loading && !err && !isIntraday && <KlineView data={kline} period={period} />}
+      {!loading && !err && !isIntraday && <KlineView data={kline} period={period} minuteSpan={minuteSpan} onMinuteSpan={setMinuteSpan} />}
     </div>
   );
 }
@@ -200,17 +201,28 @@ function IntradayView({ data, prevClose, five }: { data: IntradayPoint[]; prevCl
   );
 }
 
-function KlineView({ data, period }: { data: KP[]; period: Period }) {
+interface KlineProps {
+  data: KP[];
+  period: Period;
+  minuteSpan?: 'recent' | 'all';
+  onMinuteSpan?: (v: 'recent' | 'all') => void;
+}
+function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inited = useRef(false);
   const isMinute = period === '1分钟';
-  // 分钟级默认滚动到最新一根（盯盘看最新），仅首次初始化，避免刷新时抢走用户滚动位置
+  const showAll = isMinute && minuteSpan === 'all';
+  const fixed = isMinute; // 1分钟一律固定宽度 + 横向滚动
+  // 切换 近1.5h/全天 时重新滚动到最新；日常刷新(数据更新)不抢走用户已滚动的位置
   useEffect(() => {
-    if (isMinute && scrollRef.current && !inited.current && data.length) {
+    inited.current = false;
+  }, [minuteSpan]);
+  useEffect(() => {
+    if (fixed && scrollRef.current && !inited.current && data.length) {
       scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
       inited.current = true;
     }
-  }, [isMinute, data.length]);
+  }, [fixed, minuteSpan, data.length]);
   if (!data.length) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>暂无K线数据</div>;
   const W = 680;
   const H = 300;
@@ -221,21 +233,27 @@ function KlineView({ data, period }: { data: KP[]; period: Period }) {
   const volH = 54;
   const gap = 10;
   const priceH = H - padT - padB - volH - gap;
-  // 分钟级：保留全部 K 线，固定蜡烛宽度 + 横向滚动（每根清晰可见）；其它周期：自动适配取最近 N 根
-  const N = 220;
-  const view = isMinute ? data : data.length > N ? data.slice(data.length - N) : data;
+  // 分钟级：固定宽度蜡烛 + 横向滚动（每根足够宽才看得清走势）。
+  // 默认近 1.5 小时（90 根），点"全天"保留全部；其它周期自适应取最近 N 根填满宽度。
+  const RECENT_N = 90;
+  const N = 220; // 日/周/月 自适应取最近 N 根
+  const STRIDE = 9; // 每根蜡烛占宽(px)
+  let view: KP[];
+  if (isMinute) view = showAll ? data : data.length > RECENT_N ? data.slice(data.length - RECENT_N) : data;
+  else view = data.length > N ? data.slice(data.length - N) : data;
   const n = view.length;
-  const STRIDE = 7; // 分钟级每根蜡烛占宽(px)
-  const allLo = Math.min(...data.map((d) => d.low));
-  const allHi = Math.max(...data.map((d) => d.high));
+  // 分钟级（固定滚动）按当前可见窗口缩放Y轴，避免最近1.5h被压在全天高低点中间看不清；其它周期 view≈data 无影响
+  const loSrc = fixed ? view : data;
+  const allLo = Math.min(...loSrc.map((d) => d.low));
+  const allHi = Math.max(...loSrc.map((d) => d.high));
   const pad = (allHi - allLo) * 0.06;
   const L = allLo - pad;
   const U = allHi + pad;
   const span = U - L || 1;
-  const innerW = isMinute ? n * STRIDE : W - padL - padR;
-  const plotW = isMinute ? padL + innerW + padR : W;
+  const innerW = fixed ? n * STRIDE : W - padL - padR;
+  const plotW = fixed ? padL + innerW + padR : W;
   const xOf = (i: number) =>
-    isMinute ? padL + i * STRIDE + STRIDE / 2 : padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    fixed ? padL + i * STRIDE + STRIDE / 2 : padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yOf = (v: number) => padT + priceH - ((v - L) / span) * priceH;
   const closes = data.map((d) => d.close);
   const ma5 = sma(closes, 5);
@@ -252,7 +270,7 @@ function KlineView({ data, period }: { data: KP[]; period: Period }) {
   const stroke = up ? C.up : C.down;
   const ticks = [0, 0.5, 1].map((k) => L + span * k);
   let xticks: number[];
-  if (isMinute) {
+  if (fixed) {
     const step = Math.max(1, Math.ceil(n / 9));
     xticks = [];
     for (let i = 0; i < n; i += step) xticks.push(i);
@@ -262,7 +280,7 @@ function KlineView({ data, period }: { data: KP[]; period: Period }) {
       (v, i, a) => a.indexOf(v) === i,
     );
   }
-  const candleW = isMinute ? Math.max(3, STRIDE * 0.6) : Math.max(1.8, (innerW / n) * 0.62);
+  const candleW = fixed ? Math.max(3, STRIDE * 0.7) : Math.max(1.8, (innerW / n) * 0.72);
   const labelFmt = (s: string) => (isMinute ? s.slice(11, 16) : s.slice(5));
   const maLast = (arr: (number | null)[]) => {
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i] as number;
@@ -271,12 +289,17 @@ function KlineView({ data, period }: { data: KP[]; period: Period }) {
   return (
     <div className="chart-wrap chart-plot">
       {isMinute && (
-        <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>
-          1分钟走势 · 共 {n} 根（可左右滑动查看全天）
+        <div className="minute-switch" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span className="muted" style={{ fontSize: 11 }}>
+            {showAll ? `1分钟走势 · 全天（共 ${n} 根，可滑动）` : `1分钟走势 · 近 ${Math.round((n / 60) * 10) / 10} 小时（共 ${n} 根，可滑动）`}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button className={!showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('recent')}>近1.5h</button>
+          <button className={showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('all')}>全天</button>
         </div>
       )}
-      <div ref={scrollRef} style={isMinute ? { overflowX: 'auto', maxWidth: '100%', paddingBottom: 4 } : undefined}>
-        <svg width={isMinute ? plotW : '100%'} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="K线走势">
+      <div ref={scrollRef} style={fixed ? { overflowX: 'auto', maxWidth: '100%', paddingBottom: 4 } : undefined}>
+        <svg width={fixed ? plotW : '100%'} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="K线走势">
           {ticks.map((tv, k) => (
             <g key={k}>
               <line x1={padL} y1={yOf(tv)} x2={padL + innerW} y2={yOf(tv)} stroke={C.grid} strokeWidth={1} strokeDasharray="3 4" />
