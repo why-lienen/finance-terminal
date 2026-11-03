@@ -212,12 +212,15 @@ function KlineView({ data }: { data: KP[] }) {
   const gap = 10;
   const priceH = H - padT - padB - volH - gap;
   const innerW = W - padL - padR;
-  const n = data.length;
-  const lo = Math.min(...data.map((d) => d.low));
-  const hi = Math.max(...data.map((d) => d.high));
-  const pad = (hi - lo) * 0.06;
-  const L = lo - pad;
-  const U = hi + pad;
+  // 蜡烛过多时只显示最近 N 根，保证蜡烛可见（1分钟一屏约3小时）
+  const N = 220;
+  const view = data.length > N ? data.slice(data.length - N) : data;
+  const n = view.length;
+  const allLo = Math.min(...data.map((d) => d.low));
+  const allHi = Math.max(...data.map((d) => d.high));
+  const pad = (allHi - allLo) * 0.06;
+  const L = allLo - pad;
+  const U = allHi + pad;
   const span = U - L || 1;
   const xOf = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const yOf = (v: number) => padT + priceH - ((v - L) / span) * priceH;
@@ -225,16 +228,20 @@ function KlineView({ data }: { data: KP[] }) {
   const ma5 = sma(closes, 5);
   const ma10 = sma(closes, 10);
   const ma20 = sma(closes, 20);
+  const ma5v = ma5.slice(ma5.length - n);
+  const ma10v = ma10.slice(ma10.length - n);
+  const ma20v = ma20.slice(ma20.length - n);
   const linePts = (arr: (number | null)[]) =>
     arr.map((v, i) => (v == null ? null : `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`)).filter(Boolean).join(' ');
-  const volMax = Math.max(...data.map((d) => d.vol), 1);
+  const volMax = Math.max(...view.map((d) => d.vol), 1);
   const yVol = (v: number) => padT + priceH + gap + volH - (v / volMax) * volH;
-  const up = closes[n - 1] >= closes[0];
+  const up = view[n - 1].close >= view[0].close;
   const stroke = up ? C.up : C.down;
   const ticks = [0, 0.5, 1].map((k) => L + span * k);
   const xticks = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].filter(
     (v, i, a) => a.indexOf(v) === i,
   );
+  const candleW = Math.max(1.5, (innerW / n) * 0.62);
   const maLast = (arr: (number | null)[]) => {
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i] as number;
     return null;
@@ -248,33 +255,43 @@ function KlineView({ data }: { data: KP[] }) {
             <text x={padL + innerW + 6} y={yOf(tv) + 4} fill={C.text} fontSize="10">{fmt(tv)}</text>
           </g>
         ))}
-        <polyline points={linePts(ma5)} fill="none" stroke={C.ma5} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />
-        <polyline points={linePts(ma10)} fill="none" stroke={C.ma10} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />
-        <polyline points={linePts(ma20)} fill="none" stroke={C.ma20} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />
-        <polyline
-          points={closes.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
-          fill="none"
-          stroke={stroke}
-          strokeWidth={1.9}
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-        />
-        <circle cx={xOf(n - 1)} cy={yOf(closes[n - 1])} r={3} fill={stroke} />
-        {data.map((d, i) => {
-          const bw = Math.max(0.5, (innerW / n) * 0.62);
+        {/* 蜡烛：实体 open→close，影线 high→low（A股：涨红跌绿） */}
+        {view.map((d, i) => {
+          const x = xOf(i);
+          const yO = yOf(d.open);
+          const yC = yOf(d.close);
+          const yH = yOf(d.high);
+          const yL = yOf(d.low);
+          const isUp = d.close >= d.open;
+          const col = isUp ? C.up : C.down;
+          const top = Math.min(yO, yC);
+          const h = Math.max(1, Math.abs(yC - yO));
+          return (
+            <g key={i}>
+              <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={1} />
+              <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={col} />
+            </g>
+          );
+        })}
+        <polyline points={linePts(ma5v)} fill="none" stroke={C.ma5} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+        <polyline points={linePts(ma10v)} fill="none" stroke={C.ma10} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+        <polyline points={linePts(ma20v)} fill="none" stroke={C.ma20} strokeWidth={1.2} vectorEffect="non-scaling-stroke" />
+        {view.map((d, i) => {
+          const x = xOf(i);
           const y = yVol(d.vol);
-          const h = padT + priceH + gap + volH - y;
-          const c = d.close >= d.open ? C.up : C.down;
-          return <rect key={i} x={xOf(i) - bw / 2} y={y} width={bw} height={Math.max(0, h)} fill={c} opacity={0.5} />;
+          const hgt = padT + priceH + gap + volH - y;
+          const col = d.close >= d.open ? C.up : C.down;
+          return <rect key={i} x={x - candleW / 2} y={y} width={candleW} height={Math.max(0, hgt)} fill={col} opacity={0.45} />;
         })}
         {xticks.map((i) => (
-          <text key={i} x={xOf(i)} y={H - 6} fill={C.text} fontSize="10" textAnchor="middle">{data[i].date.slice(5)}</text>
+          <text key={i} x={xOf(i)} y={H - 6} fill={C.text} fontSize="10" textAnchor="middle">{view[i].date.slice(5)}</text>
         ))}
       </svg>
       <div className="chart-legend">
-        <span style={{ color: C.ma5 }}>MA5 {maLast(ma5) != null ? fmt(maLast(ma5) as number) : '—'}</span>
-        <span style={{ color: C.ma10 }}>MA10 {maLast(ma10) != null ? fmt(maLast(ma10) as number) : '—'}</span>
-        <span style={{ color: C.ma20 }}>MA20 {maLast(ma20) != null ? fmt(maLast(ma20) as number) : '—'}</span>
+        <span style={{ color: C.ma5 }}>MA5 {maLast(ma5v) != null ? fmt(maLast(ma5v) as number) : '—'}</span>
+        <span style={{ color: C.ma10 }}>MA10 {maLast(ma10v) != null ? fmt(maLast(ma10v) as number) : '—'}</span>
+        <span style={{ color: C.ma20 }}>MA20 {maLast(ma20v) != null ? fmt(maLast(ma20v) as number) : '—'}</span>
+        <span className="muted">（蜡烛图：涨红跌绿）</span>
       </div>
     </div>
   );

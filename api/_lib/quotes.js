@@ -271,7 +271,9 @@ async function getKline(secid, period = 'day', limit = 60) {
       };
     });
     const data = { code, name, period, list };
-    setCache(key, data, HISTORY_TTL);
+    // 分钟级 K 线变化快，用短缓存；日/周/月变化慢，沿用长缓存
+    const isMinute = ['1min', '5m', '15m', '30m', '60m'].includes(period);
+    setCache(key, data, isMinute ? 20000 : HISTORY_TTL);
     return data;
   } catch (e) {
     return getCached(key) || { code: secid, name: '', period, list: [] };

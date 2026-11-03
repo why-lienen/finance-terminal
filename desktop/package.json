@@ -6,6 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "postinstall": "sh scripts/setup-electron.sh",
     "pack": "electron-packager . finance-terminal --platform=darwin --arch=arm64 --overwrite --electron-zip-dir=./.cache"
   },
   "devDependencies": {
