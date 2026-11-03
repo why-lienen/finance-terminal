@@ -76,12 +76,13 @@ export interface RealtimeState {
   dismissToast: (id: number) => void;
 }
 
-const MAX_POINTS = 120; // 约 10 分钟（5s 轮询）
+const MAX_POINTS = 120; // 股票卡片迷你曲线：约 10 分钟（5s 轮询）
+const GOLD_MAX = 360; // 国际金价详情图：拉长到约 30 分钟滚动窗口
 
-function pushPoint(arr: number[] | undefined, v: number): number[] {
+function pushPoint(arr: number[] | undefined, v: number, max = MAX_POINTS): number[] {
   const next = arr ? arr.slice() : [];
   next.push(v);
-  if (next.length > MAX_POINTS) next.splice(0, next.length - MAX_POINTS);
+  if (next.length > max) next.splice(0, next.length - max);
   return next;
 }
 
@@ -173,7 +174,7 @@ export function useRealtimeMonitor(
     try {
       const data = await getMonitor(secids);
       const newSeries = { ...seriesRef.current };
-      if (withGold && data.gold) newSeries['GOLD'] = pushPoint(newSeries['GOLD'], data.gold.price);
+      if (withGold && data.gold) newSeries['GOLD'] = pushPoint(newSeries['GOLD'], data.gold.price, GOLD_MAX);
       const map = keyByCode(data.stocks);
       for (const code in map) newSeries[code] = pushPoint(newSeries[code], map[code].price);
       seriesRef.current = newSeries;

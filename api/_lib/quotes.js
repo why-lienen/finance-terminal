@@ -278,6 +278,38 @@ async function getKline(secid, period = 'day', limit = 60) {
   }
 }
 
+// 分时（全天/多日）：东方财富 push2his trends2，返回每根分钟的 最新价/均价/成交量
+// 用于"分时/五日"走势图；days=1 为当日，days=5 为最近5个交易日拼接
+async function getIntraday(secid, days = 1) {
+  const key = `intraday:${secid}:${days}`;
+  const cached = getCached(key);
+  if (cached) return cached;
+  const url =
+    `https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=${secid}` +
+    `&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=${days}&forcect=1`;
+  try {
+    const text = await fetchText(url, { Referer: 'https://quote.eastmoney.com/' }, 1, 8000);
+    const json = JSON.parse(text);
+    const trends = json?.data?.trends || [];
+    const list = trends
+      .map((s) => {
+        const p = String(s).split(',');
+        return {
+          t: p[0], // "2026-11-03 09:30"
+          price: parseFloat(p[3]), // 最新价 (f53)
+          avg: parseFloat(p[7]), // 均价 (f58)
+          vol: parseFloat(p[5]), // 成交量(手) (f56)
+        };
+      })
+      .filter((x) => Number.isFinite(x.price));
+    const data = { code: json?.data?.code || secid, name: json?.data?.name || '', days, list };
+    setCache(key, data, 15000); // 分时变化快，短缓存便于实时刷新
+    return data;
+  } catch (e) {
+    return getCacheSoft(key) || { code: secid, name: '', days, list: [] };
+  }
+}
+
 // 股票/指数搜索：东方财富 suggest（按关键词过滤，JSON/UTF-8）为主，腾讯智能选股(GBK)兜底
 // 返回 [{code, secid, name, type}]，secid 形如 1.600519 / 0.002181
 const EM_SEARCH_TOKEN = 'D43BF722C8E5ADC0C3E1CEA6A1D6D2E5';
@@ -380,4 +412,4 @@ async function getGold() {
   return { price: 0, name: '伦敦金 XAU/USD', code: 'XAU', source: 'none', stale: true, unit: '美元/盎司', note: '行情接口暂不可用' };
 }
 
-module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getGold, getSearch };
+module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getIntraday, getGold, getSearch };

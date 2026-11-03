@@ -46,3 +46,17 @@ export function getKline(secid: string, period = 'day', limit = 60) {
     )
     .then((r) => r.data);
 }
+
+export interface IntradayPoint {
+  t: string; // "2026-11-03 09:30"
+  price: number;
+  avg: number; // 均价
+  vol: number; // 成交量(手)
+}
+export function getIntraday(secid: string, days = 1) {
+  return api
+    .get<{ code: string; name: string; days: number; list: IntradayPoint[] }>(
+      '/market/stock/intraday?secid=' + secid + '&days=' + days,
+    )
+    .then((r) => r.data);
+}

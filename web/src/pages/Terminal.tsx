@@ -5,6 +5,7 @@ import type { WatchItem } from '../types';
 import { useRealtimeMonitor } from '../hooks';
 import { cls, fmt, fmtPct } from '../utils';
 import Sparkline from '../components/Sparkline';
+import StockChart from '../components/StockChart';
 import Modal from '../components/Modal';
 import { getAlert, setAlert, removeAlert, loadAlerts, loadAlertLog, type AlertLogEntry } from '../store/alerts';
 import { ensureAudio, playAlertSound, setSoundEnabled } from '../alertAudio';
@@ -26,6 +27,7 @@ interface CardData {
   change: number | null;
   sub?: string; // 副标题（如金价来源）
   series: number[];
+  prevClose?: number; // 昨收，用于分时图 0% 基准线
   triggered: boolean;
 }
 
@@ -148,6 +150,7 @@ export default function Terminal() {
       pct: s ? s.pct : null,
       change: s ? s.change : null,
       series: series[code] || [],
+      prevClose: s ? s.prevClose : undefined,
       triggered: !!triggered[code],
     });
   }
@@ -217,7 +220,7 @@ export default function Terminal() {
               <div className="mcard-top">
                 <div>
                   <div className="mcard-name">{c.name}</div>
-                  <div className="muted mcard-sub">{c.isGold ? c.sub : c.symbol}</div>
+                  <div className="muted mcard-sub">{c.isGold ? c.sub : codeOf(c.symbol)}</div>
                 </div>
                 {!c.isGold && (
                   <button
@@ -323,10 +326,18 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
         <span className="big" style={{ fontSize: 20 }}>{card.price != null ? fmt(card.price) : '—'}</span>
       </div>
 
-      <div className="chart-card">
-        <LineChartInline series={chartSeries} />
-      </div>
-      <div className="muted" style={{ marginTop: 4 }}>实时曲线（最近约 10 分钟，每 5 秒刷新）</div>
+      {card.isGold ? (
+        <>
+          <div className="chart-card">
+            <LineChartInline series={chartSeries} />
+          </div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            国际金价历史免费数据源不可用，此处为实时滚动曲线（约 30 分钟，每 5 秒刷新）
+          </div>
+        </>
+      ) : (
+        <StockChart secid={card.symbol} name={card.name} prevClose={card.prevClose} />
+      )}
 
       <div style={{ marginTop: 16 }}>
         <div className="muted" style={{ marginBottom: 8 }}>到价提醒（价格触及即弹窗+声音+系统通知）</div>

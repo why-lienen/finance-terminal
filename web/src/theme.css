@@ -186,6 +186,8 @@ button.danger:hover { background: var(--up); color: #fff; }
   border-radius: var(--radius-sm);
   padding: 6px 4px 2px;
 }
+.chart-legend { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); padding: 5px 6px 0; align-items: center; flex-wrap: wrap; }
+.chart-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 .range-tabs { display: inline-flex; gap: 4px; }
 .range-tabs button { padding: 4px 10px; font-size: 12px; font-weight: 600; }
 .range-tabs button.active { background: var(--accent); color: #1a1205; border: none; }

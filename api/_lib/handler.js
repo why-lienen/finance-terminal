@@ -76,6 +76,13 @@ async function handler(req, res) {
       return send(res, 200, await quotes.getKline(secid, period, limit));
     }
 
+    if (path === '/api/market/stock/intraday') {
+      const secid = (q.get('secid') || '').trim();
+      const days = parseInt(q.get('days') || '1', 10);
+      if (!secid) return send(res, 400, { error: 'need secid' });
+      return send(res, 200, await quotes.getIntraday(secid, days));
+    }
+
     if (path === '/api/market/gold') {
       return send(res, 200, await quotes.getGold());
     }
