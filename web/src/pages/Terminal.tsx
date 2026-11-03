@@ -17,11 +17,20 @@ function codeOf(symbol: string) {
 }
 const GOLD_KEY = 'GOLD';
 
+// 固定盯盘标的（与金价并列，常驻不可删）：美油 WTI + 美元指数 DXY
+// secid 为东方财富全球/期货代码；实时价与走势图共用同一数据源，避免金价那种"实时价与图末点对不上"
+const FIXED_ASSETS = [
+  { key: 'CL00Y', symbol: '102.CL00Y', name: '美油 WTI', sub: 'NYMEX WTI 原油', unit: '美元/桶' },
+  { key: 'UDI', symbol: '100.UDI', name: '美元指数', sub: '美元指数 DXY', unit: '' },
+];
+
 interface CardData {
   key: string;
   symbol: string;
   name: string;
   isGold: boolean;
+  isFixed?: boolean;
+  unit?: string;
   price: number | null;
   pct: number | null;
   change: number | null;
@@ -43,7 +52,10 @@ export default function Terminal() {
   const boxRef = useRef<HTMLDivElement>(null);
 
   const stockWatch = useMemo(() => watch.filter((x) => x.type === 'stock'), [watch]);
-  const symbols = useMemo(() => stockWatch.map((w) => w.symbol), [stockWatch]);
+  const symbols = useMemo(
+    () => [...stockWatch.map((w) => w.symbol), ...FIXED_ASSETS.map((a) => a.symbol)],
+    [stockWatch],
+  );
 
   const { gold, stocks, series, triggered, loading, error, lastUpdate, toasts, dismissToast } =
     useRealtimeMonitor(symbols, { withGold: true, intervalMs: 5000 });
@@ -88,7 +100,7 @@ export default function Terminal() {
 
   function add(sec: string, nm: string) {
     if (!sec) return;
-    if (loadWatch().some((x) => x.symbol === sec)) {
+    if (loadWatch().some((x) => x.symbol === sec) || FIXED_ASSETS.some((a) => a.symbol === sec)) {
       setQuery('');
       setResults([]);
       setOpen(false);
@@ -152,6 +164,25 @@ export default function Terminal() {
       series: series[code] || [],
       prevClose: s ? s.prevClose : undefined,
       triggered: !!triggered[code],
+    });
+  }
+  // 固定盯盘标的：美油 WTI + 美元指数（常驻，不可删）
+  for (const a of FIXED_ASSETS) {
+    const s = stocks[a.key];
+    cards.push({
+      key: a.key,
+      symbol: a.symbol,
+      name: a.name,
+      isGold: false,
+      isFixed: true,
+      sub: a.sub,
+      unit: a.unit || undefined,
+      price: s ? s.price : null,
+      pct: s ? s.pct : null,
+      change: s ? s.change : null,
+      series: series[a.key] || [],
+      prevClose: s ? s.prevClose : undefined,
+      triggered: !!triggered[a.key],
     });
   }
 
@@ -220,9 +251,9 @@ export default function Terminal() {
               <div className="mcard-top">
                 <div>
                   <div className="mcard-name">{c.name}</div>
-                  <div className="muted mcard-sub">{c.isGold ? c.sub : codeOf(c.symbol)}</div>
+                  <div className="muted mcard-sub">{c.isGold || c.isFixed ? c.sub : codeOf(c.symbol)}</div>
                 </div>
-                {!c.isGold && (
+                {!c.isGold && !c.isFixed && (
                   <button
                     className="mcard-x"
                     onClick={(e) => {
@@ -291,7 +322,7 @@ export default function Terminal() {
 
 function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void }) {
   const key = card.key;
-  const unit = card.isGold ? '美元/盎司' : '';
+  const unit = card.unit || (card.isGold ? '美元/盎司' : '');
   const existing = getAlert(key);
   const [upper, setUpper] = useState<string>(existing?.upper != null ? String(existing.upper) : '');
   const [lower, setLower] = useState<string>(existing?.lower != null ? String(existing.lower) : '');
@@ -339,9 +370,9 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
         <div className="muted" style={{ marginBottom: 8 }}>到价提醒（价格触及即弹窗+声音+系统通知）</div>
         <div className="form">
           <label>突破上限 ↑</label>
-          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3950' : '如 8.5'} value={upper} onChange={(e) => setUpper(e.target.value)} />
+          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3950' : card.price != null ? '如 ' + fmt(card.price) : '输入价格'} value={upper} onChange={(e) => setUpper(e.target.value)} />
           <label>跌破下限 ↓</label>
-          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3850' : '如 7.0'} value={lower} onChange={(e) => setLower(e.target.value)} />
+          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3850' : card.price != null ? '如 ' + fmt(card.price) : '输入价格'} value={lower} onChange={(e) => setLower(e.target.value)} />
           {unit && <div className="muted" style={{ marginTop: 4 }}>单位：{unit}（与现价口径一致）</div>}
         </div>
         <div className="form" style={{ marginTop: 6 }}>
@@ -363,6 +394,8 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
 function AlertCenter() {
   const alerts = loadAlerts();
   const log = loadAlertLog();
+  const NAME_MAP: Record<string, string> = { [GOLD_KEY]: '国际金价', CL00Y: '美油 WTI', UDI: '美元指数' };
+  const UNIT_MAP: Record<string, string> = { [GOLD_KEY]: '美元/盎司', CL00Y: '美元/桶' };
   const entries = Object.entries(alerts).filter(([, r]) => r && (r.upper != null || r.lower != null));
   return (
     <div className="grid cols-2" style={{ marginTop: 18 }}>
@@ -371,11 +404,11 @@ function AlertCenter() {
         {entries.length === 0 && <div className="muted">还没有设置预警，点击任意卡片右上角区域设定价格提醒。</div>}
         {entries.map(([key, r]) => (
           <div className="row" key={key}>
-            <span>{key === GOLD_KEY ? '国际金价' : key}</span>
+            <span>{NAME_MAP[key] || key}</span>
             <span>
               {r.upper != null && <span className="up">↑{fmt(r.upper)} </span>}
               {r.lower != null && <span className="down">↓{fmt(r.lower)}</span>}
-              {key === GOLD_KEY && (r.upper != null || r.lower != null) && <span className="muted">美元/盎司</span>}
+              {UNIT_MAP[key] && (r.upper != null || r.lower != null) && <span className="muted">{UNIT_MAP[key]}</span>}
               {!r.enabled && <span className="muted">（已停用）</span>}
             </span>
           </div>

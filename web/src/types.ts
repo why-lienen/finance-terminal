@@ -6,6 +6,7 @@ export interface Stock {
   pct: number;
   change: number;
   volume?: number;
+  prevClose?: number; // 昨收，用于分时图 0% 基准线
 }
 
 export interface FundEst {

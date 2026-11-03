@@ -36,7 +36,7 @@ function sma(values: number[], n: number): (number | null)[] {
   });
 }
 
-export default function StockChart({ secid, name, prevClose, gold }: { secid: string; name?: string; prevClose?: number; gold?: boolean }) {
+export default function StockChart({ secid, name, prevClose, gold }: { secid?: string; name?: string; prevClose?: number; gold?: boolean }) {
   const [period, setPeriod] = useState<Period>('分时');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
