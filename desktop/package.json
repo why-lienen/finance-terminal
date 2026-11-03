@@ -9,7 +9,6 @@
     "pack": "electron-packager . finance-terminal --platform=darwin --arch=arm64 --overwrite --electron-zip-dir=./.cache"
   },
   "devDependencies": {
-    "electron": "^31.0.0",
-    "electron-packager": "^18.3.0"
+    "electron": "^31.0.0"
   }
 }

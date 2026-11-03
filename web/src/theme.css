@@ -203,14 +203,6 @@ button.danger:hover { background: var(--up); color: #fff; }
 .table-scroll::-webkit-scrollbar { height: 8px; }
 .table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
 
-/* ===== 菜单栏紧凑模式（?bar=1） ===== */
-.bar-app { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
-.bar-ticker { display: flex; gap: 18px; align-items: center; overflow-x: auto; padding: 8px 12px; }
-.bar-ticker .item { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; font-size: 12px; }
-.bar-ticker .item .nm { color: var(--text-dim); }
-.bar-ticker .item .val { font-family: var(--mono); font-weight: 700; }
-.bar-empty { padding: 16px; color: var(--text-dim); font-size: 12px; }
-
 /* ===== 专属盯盘终端 ===== */
 .term-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
 .term-search { flex: 1; min-width: 260px; margin-bottom: 0; }
