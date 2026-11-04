@@ -59,13 +59,40 @@ body {
   padding: 1px 6px; border-radius: 6px; letter-spacing: .5px;
 }
 .topbar nav { display: flex; gap: 4px; flex: 1; }
+.freshness {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: rgba(217, 149, 42, 0.12); border: 1px solid rgba(217, 149, 42, 0.35);
+  padding: 2px 9px; border-radius: 999px; letter-spacing: .3px; white-space: nowrap;
+}
 .tab {
   padding: 7px 14px; border-radius: var(--radius-sm); color: var(--text-dim);
   text-decoration: none; font-size: 14px; font-weight: 500; transition: all .15s;
 }
 .tab:hover { background: var(--bg-elev); color: var(--text); }
 .tab.active { background: var(--bg-elev); color: var(--accent); font-weight: 700; box-shadow: inset 0 -2px 0 var(--accent); }
-.topbar .clock { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+.topbar .clock { color: var(--text-dim); font-family: var(--mono); font-size: 12px; margin-left: 6px; }
+
+/* 顶栏右侧操作区（声音 / 透明 / 收起） */
+.top-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.icon-btn {
+  width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px; border-radius: 8px; background: var(--bg-elev); border: 1px solid var(--border); cursor: pointer;
+}
+.icon-btn:hover { border-color: var(--accent); }
+.icon-btn.on { background: rgba(217, 149, 42, 0.16); border-color: var(--accent); }
+.icon-btn.off { opacity: .6; }
+.icon-btn.close:hover { background: var(--up); color: #fff; border-color: var(--up); }
+/* 透明背景开关：带文字与实心高亮，点下去状态一眼可见 */
+.trans-btn {
+  height: 30px; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  border-radius: 8px; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim);
+  -webkit-app-region: no-drag;
+}
+.trans-btn:hover { border-color: var(--accent); }
+.trans-btn.on {
+  background: var(--accent); color: #1a1205; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(217, 149, 42, 0.25);
+}
 
 .content { padding: 22px; flex: 1; max-width: 1240px; width: 100%; margin: 0 auto; }
 
@@ -188,9 +215,12 @@ button.danger:hover { background: var(--up); color: #fff; }
 }
 .chart-legend { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); padding: 5px 6px 0; align-items: center; flex-wrap: wrap; }
 .chart-legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-.range-tabs { display: inline-flex; gap: 4px; }
+.range-tabs { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .range-tabs button { padding: 4px 10px; font-size: 12px; font-weight: 600; }
 .range-tabs button.active { background: var(--accent); color: #1a1205; border: none; }
+.chart-tools { display: inline-flex; gap: 6px; align-items: center; margin-left: 4px; }
+.zoom-btn { padding: 2px 9px; font-size: 13px; font-weight: 700; line-height: 1.4; min-width: 26px; }
+.zoom-val { font-size: 11px; min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .minute-switch .seg { padding: 2px 9px; font-size: 11px; font-weight: 600; line-height: 1.4; border: 1px solid var(--border); background: #fff; color: var(--text-dim); border-radius: 6px; cursor: pointer; }
 .minute-switch .seg.on { background: var(--accent); color: #1a1205; border-color: var(--accent); }
 
@@ -208,10 +238,6 @@ button.danger:hover { background: var(--up); color: #fff; }
 /* ===== 专属盯盘终端 ===== */
 .term-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
 .term-search { flex: 1; min-width: 260px; margin-bottom: 0; }
-.term-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.term-status { font-size: 12px; font-weight: 600; font-family: var(--mono); }
-.term-status.ok { color: var(--down); }
-.term-status.bad { color: var(--up); }
 
 .board {
   display: grid; gap: 14px;
@@ -239,6 +265,12 @@ button.danger:hover { background: var(--up); color: #fff; }
   font-size: 13px; padding: 2px 6px; border-radius: 6px;
 }
 .mcard-x:hover { color: var(--up); background: var(--up-soft); }
+.mcard-actions { display: flex; align-items: center; gap: 2px; }
+.mcard-pop {
+  background: transparent; border: none; color: var(--text-faint);
+  font-size: 13px; padding: 2px 6px; border-radius: 6px;
+}
+.mcard-pop:hover { color: var(--accent-2); background: rgba(47, 111, 237, 0.10); }
 .mcard-price { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 4px; }
 .mcard-price .big { font-size: 26px; }
 .mcard-spark { height: 42px; margin: 2px 0; }
@@ -271,37 +303,132 @@ button.danger:hover { background: var(--up); color: #fff; }
 @keyframes slidein { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ===== 菜单栏 app 模式（Electron，body 带 .electron-app）=====
-   透明常驻 + 可拖动：窗口背景透出桌面，只有卡片悬浮可见；
-   顶栏可拖动，输入框/按钮不可拖动，避免误拖。 */
-.electron-app,
-.electron-app #root {
+   整窗可拖动：body 设为 drag，窗口内「任意空白处」按住都能平移整个窗口。
+   Electron 命中测试会沿祖先链找最近的 -webkit-app-region 声明，因此只要把
+   「需要点击 / 输入 / 滚动 / 选中」的元素单独标为 no-drag，其余空白处自动可拖。
+   注意：drag 区域会吞掉点击与文本选择，所以下列排除项必须齐全。 */
+.electron-app { -webkit-app-region: drag; }
+
+.electron-app button,
+.electron-app input,
+.electron-app select,
+.electron-app textarea,
+.electron-app a,
+.electron-app .mcard,            /* 卡片：点击打开详情 */
+.electron-app .search-dropdown,  /* 搜索候选下拉 */
+.electron-app .search-item,
+.electron-app .search-hint,
+.electron-app .toast-stack,      /* 提醒 Toast：点击消除 */
+.electron-app .toast,
+.electron-app .modal-overlay,    /* 详情弹窗：内部有图表缩放/滚动/按钮 */
+.electron-app .modal-panel { -webkit-app-region: no-drag; }
+
+/* 默认不透明（普通窗口观感）；用户开启「透明背景」后 body 带 .transparent-bg 才透出桌面 */
+.electron-app .content,
+.electron-app .board { background: transparent; }
+.electron-app.transparent-bg,
+.electron-app.transparent-bg #root,
+.electron-app.transparent-bg .app {
   background: transparent !important;
   background-image: none !important;
 }
-.electron-app .content,
-.electron-app .board { background: transparent; }
+/* 透明模式：把顶栏/搜索条/卡片这些大面积白底也一起让开，桌面才「真的透得出来」。
+   否则卡片 0.92 白 + 顶栏 0.82 白，看着仍是一整块白板，会让人以为按钮没反应。 */
+.electron-app.transparent-bg .topbar {
+  background: rgba(255, 255, 255, 0.26) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+.electron-app.transparent-bg .term-bar { background: rgba(238, 241, 246, 0.20) !important; }
+.electron-app.transparent-bg .content { background: transparent !important; }
+.electron-app.transparent-bg .mcard,
+.electron-app.transparent-bg .card {
+  background: rgba(255, 255, 255, 0.70) !important;
+  backdrop-filter: blur(6px);
+}
 
-/* 顶栏作为拖动热区（—webkit-app-region: drag），内部交互元素单独排除 */
+/* 搜索条只保留视觉样式；拖动已由 body 整窗接管，无需再单独声明 drag */
 .electron-app .term-bar {
-  -webkit-app-region: drag;
   background: rgba(238, 241, 246, 0.80);
   backdrop-filter: blur(10px);
   border-radius: var(--radius);
   padding: 10px 12px;
 }
-.electron-app .term-bar input,
-.electron-app .term-bar button,
-.electron-app .term-bar .search-dropdown,
-.electron-app .term-bar .search-hint { -webkit-app-region: no-drag; }
 
 /* 卡片半透明玻璃感，既能看清走势又保留“悬浮常驻”观感 */
 .electron-app .card,
 .electron-app .mcard { background: rgba(255, 255, 255, 0.92); }
 
-/* 收起窗口按钮 */
-.app-close {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; padding: 0; border-radius: 50%;
-  color: var(--text-dim); border-color: var(--border);
+/* ===== 拖出卡片的独立浮窗（Electron，body 带 .electron-float）=====
+   窗口本身 transparent + alwaysOnTop。透明偏好跟随主窗口（由主进程给 body 打 .transparent-bg）：
+   白板模式整窗不透明浅灰；透明模式整窗透出桌面、卡片降到 0.70 毛玻璃（与主窗口 .mcard 一致）。 */
+.electron-float,
+.electron-float #root {
+  background: var(--bg) !important;
+  background-image: var(--bg-grad) !important;
 }
-.app-close:hover { color: #fff; background: var(--up); border-color: var(--up); }
+.electron-float.transparent-bg,
+.electron-float.transparent-bg #root {
+  background: transparent !important;
+  background-image: none !important;
+}
+.electron-float.transparent-bg .float-card {
+  background: rgba(255, 255, 255, 0.70) !important;
+  backdrop-filter: blur(6px);
+}
+/* 浮窗同样整窗可拖：点价格/走势图空白处也能拖走，✕ 等按钮单独排除 */
+.electron-float { -webkit-app-region: drag; }
+.electron-float button { -webkit-app-region: no-drag; }
+.float-widget { height: 100%; display: flex; align-items: stretch; justify-content: stretch; padding: 8px; }
+.float-card {
+  flex: 1; display: flex; flex-direction: column;
+  background: rgba(255, 255, 255, 0.94); border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px 14px; box-shadow: 0 10px 34px rgba(20, 32, 56, 0.28);
+  backdrop-filter: blur(8px);
+}
+.float-head { display: flex; align-items: center; gap: 8px; cursor: grab; -webkit-app-region: drag; }
+.float-head:active { cursor: grabbing; }
+.float-name { font-weight: 800; font-size: 15px; }
+.float-sub { font-size: 11px; }
+.float-x { margin-left: auto; background: transparent; border: none; color: var(--text-faint); font-size: 14px; padding: 2px 6px; border-radius: 6px; -webkit-app-region: no-drag; }
+.float-x:hover { color: var(--up); background: var(--up-soft); }
+.float-price { display: flex; align-items: baseline; gap: 10px; margin: 8px 0; }
+.float-price .big { font-size: 30px; }
+.float-spark { flex: 1; min-height: 140px; }
+.float-foot { font-size: 11px; text-align: center; margin-top: 6px; }
+
+/* ===== 独立大图表窗口（Electron，body 带 .electron-chart）=====
+   只有顶部标题栏可拖；图表区保留全部点击 / 滚动 / 周期切换交互，不被 drag 吞掉。 */
+.electron-chart { -webkit-app-region: no-drag; }
+.electron-chart .chart-head { -webkit-app-region: drag; }
+.electron-chart .chart-head button { -webkit-app-region: no-drag; }
+.chart-window {
+  height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); background-image: var(--bg-grad);
+  overflow: auto;
+}
+.chart-head {
+  display: flex; align-items: center; gap: 18px;
+  padding: 12px 20px; min-height: 58px;
+  background: rgba(255, 255, 255, 0.86); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+.chart-head-left { display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.chart-title { font-weight: 800; font-size: 18px; }
+.chart-sub { font-size: 12px; }
+.chart-head-price { display: flex; align-items: baseline; gap: 12px; margin-left: auto; white-space: nowrap; }
+.chart-head-price .big { font-size: 24px; font-weight: 800; }
+.chart-head-hint { font-size: 11px; }
+.chart-close {
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg-elev); color: var(--text-dim); font-size: 15px; cursor: pointer;
+}
+.chart-close:hover { background: var(--up); color: #fff; border-color: var(--up); }
+.chart-body { flex: 1; padding: 16px 22px 24px; min-width: 0; }
+
+/* 浮窗「最近 10 分钟 1 分钟走势」 */
+.minute-spark { display: block; }
+.minute-empty {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-faint); font-size: 12px;
+}

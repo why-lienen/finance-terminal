@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getSearch, type SearchResult } from '../api/market';
 import { loadWatch, saveWatch } from '../store/local';
-import type { WatchItem, Stock } from '../types';
+import type { WatchItem, Stock, CardData } from '../types';
 import { useRealtimeMonitor } from '../hooks';
 import { cls, fmt, fmtPct } from '../utils';
 import Sparkline from '../components/Sparkline';
-import StockChart from '../components/StockChart';
 import Modal from '../components/Modal';
-import { getAlert, setAlert, removeAlert, loadAlerts, loadAlertLog, type AlertLogEntry } from '../store/alerts';
-import { ensureAudio, playAlertSound, setSoundEnabled } from '../alertAudio';
-import { canNotify, requestNotify, sendNotify, notifyPermission } from '../alertNotify';
+import DetailPanel from '../components/DetailPanel';
+import { getAlert, removeAlert, loadAlerts, loadAlertLog, type AlertLogEntry } from '../store/alerts';
 
 function codeOf(symbol: string) {
   const p = symbol.split('.');
@@ -24,22 +22,6 @@ const FIXED_ASSETS = [
   { key: 'UDI', symbol: '100.UDI', name: '美元指数', sub: '美元指数 DXY', unit: '' },
 ];
 
-interface CardData {
-  key: string;
-  symbol: string;
-  name: string;
-  isGold: boolean;
-  isFixed?: boolean;
-  unit?: string;
-  price: number | null;
-  pct: number | null;
-  change: number | null;
-  sub?: string; // 副标题（如金价来源）
-  series: number[];
-  prevClose?: number; // 昨收，用于分时图 0% 基准线
-  triggered: boolean;
-}
-
 export default function Terminal() {
   const [watch, setWatch] = useState<WatchItem[]>([]);
   const [query, setQuery] = useState('');
@@ -47,11 +29,12 @@ export default function Terminal() {
   const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<CardData | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
-  const [notifyState, setNotifyState] = useState<NotificationPermission>('default');
   const boxRef = useRef<HTMLDivElement>(null);
   // 仅在 Electron 菜单栏 app 内（preload 注入了 window.appShell）显示「收起窗口」按钮
   const isElectron = typeof window !== 'undefined' && !!(window as any).appShell;
+  // 已触发提醒：用户点掉后隐藏（红框+徽标都消失）；若该标的再次触发则自动重新显示
+  const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
+  const prevTrig = useRef<Record<string, boolean>>({});
 
   const stockWatch = useMemo(() => watch.filter((x) => x.type === 'stock'), [watch]);
   const symbols = useMemo(
@@ -59,13 +42,11 @@ export default function Terminal() {
     [stockWatch],
   );
 
-  const { gold, stocks, series, triggered, loading, error, lastUpdate, toasts, dismissToast } =
+  const { gold, stocks, series, triggered, loading, toasts, dismissToast } =
     useRealtimeMonitor(symbols, { withGold: true, intervalMs: 5000 });
 
   useEffect(() => {
     setWatch(loadWatch());
-    setSoundEnabled(true);
-    if (canNotify()) setNotifyState(Notification.permission);
   }, []);
 
   // 防抖搜索
@@ -122,18 +103,35 @@ export default function Terminal() {
     removeAlert(codeOf(sym));
   }
 
-  function toggleSound() {
-    const next = !soundOn;
-    if (next) {
-      ensureAudio(); // 用户手势，初始化音频
-      playAlertSound();
+  // 把某张卡片「拖出」为独立浮窗（仅 Electron 内可用）
+  function popOut(c: CardData) {
+    const shell = (window as any).appShell;
+    if (shell && shell.float) {
+      shell.float(c.symbol, c.name, c.key, c.isGold ? 'gold' : c.isFixed ? 'fixed' : 'stock');
     }
-    setSoundOn(next);
-    setSoundEnabled(next);
   }
-  async function enableNotify() {
-    const p = await requestNotify();
-    setNotifyState(p);
+
+  // 稳定的 onClose：配合 DetailPanel 的 React.memo，避免主窗口每 5 秒行情刷新
+  // 把详情内容连带重渲染（用户反馈「打开详情后每次数据刷新整个一闪」）。
+  const closeDetail = useCallback(() => setDetail(null), []);
+
+  // 点卡片：Electron 内直接开「独立大图表窗口」（图纸真正放大，不再挤在 500x720 主窗里）；
+  // 浏览器模式没有 appShell → 保留原来的小 Modal 作为兜底，功能不丢。
+  function openDetail(c: CardData) {
+    const shell = (window as any).appShell;
+    if (isElectron && shell && shell.openChart) {
+      shell.openChart({
+        secid: c.symbol,
+        name: c.name,
+        code: c.key,
+        kind: c.isGold ? 'gold' : c.isFixed ? 'fixed' : 'stock',
+        prevClose: c.prevClose ?? '',
+        unit: c.unit ?? '',
+        sub: c.sub ?? '',
+      });
+      return;
+    }
+    setDetail(c);
   }
 
   // 组装卡片数据
@@ -190,6 +188,23 @@ export default function Terminal() {
 
   const ruleOf = (key: string) => getAlert(key);
 
+  // 当某个标的「再次触发」时，清除它之前的"已忽略"，让红框+徽标重新出现
+  const trigKey = cards.map((c) => c.key + (c.triggered ? '1' : '0')).join(',');
+  useEffect(() => {
+    for (const c of cards) {
+      const was = prevTrig.current[c.key];
+      if (c.triggered && !was && dismissed[c.key]) {
+        setDismissed((d) => {
+          const n = { ...d };
+          delete n[c.key];
+          return n;
+        });
+      }
+      prevTrig.current[c.key] = c.triggered;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigKey]);
+
   return (
     <div>
       {/* 控制条 */}
@@ -219,28 +234,6 @@ export default function Terminal() {
             </div>
           )}
         </div>
-
-        <div className="term-tools">
-          <span className={'term-status ' + (error ? 'bad' : 'ok')}>
-            {error ? '连接异常' : loading ? '连接中…' : '● 实时'}
-            {lastUpdate > 0 && !error && (
-              <span className="muted"> · {new Date(lastUpdate).toLocaleTimeString('zh-CN', { hour12: false })}</span>
-            )}
-          </span>
-          <button className={soundOn ? 'primary' : ''} onClick={toggleSound}>
-            {soundOn ? '🔊 提醒音' : '🔇 静音'}
-          </button>
-          {notifyState === 'granted' ? (
-            <span className="pill ok">通知已开</span>
-          ) : notifyState === 'denied' ? (
-            <span className="pill">通知被拒</span>
-          ) : (
-            <button onClick={enableNotify}>开启系统通知</button>
-          )}
-          {isElectron && (
-            <button className="app-close" title="收起盯盘窗口" onClick={() => (window as any).appShell.close()}>✕</button>
-          )}
-        </div>
       </div>
 
       {/* 监控看板 */}
@@ -250,36 +243,50 @@ export default function Terminal() {
           return (
             <div
               key={c.key}
-              className={'mcard' + (c.triggered ? ' alerting' : '')}
-              onClick={() => setDetail(c)}
+              className={'mcard' + (c.triggered && !dismissed[c.key] ? ' alerting' : '')}
+              onClick={() => openDetail(c)}
             >
               <div className="mcard-top">
                 <div>
                   <div className="mcard-name">{c.name}</div>
                   <div className="muted mcard-sub">{c.isGold || c.isFixed ? c.sub : codeOf(c.symbol)}</div>
                 </div>
-                {!c.isGold && !c.isFixed && (
-                  <button
-                    className="mcard-x"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      del(c.symbol);
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
+                <div className="mcard-actions">
+                  {isElectron && (
+                    <button
+                      className="mcard-pop"
+                      title="拖出为独立浮窗（最上层常驻，可拖动；拖回面板即收回）"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        popOut(c);
+                      }}
+                    >
+                      ⧉
+                    </button>
+                  )}
+                  {!c.isGold && !c.isFixed && (
+                    <button
+                      className="mcard-x"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        del(c.symbol);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="mcard-price">
                 <span className="big">{c.price != null ? fmt(c.price) : '—'}</span>
                 {c.pct != null && (
-                  <span className={'tag ' + cls(c.pct)}>{fmtPct(c.pct)}</span>
+                  <span className={'tag ' + cls(c.pct)} title="今日涨跌幅（相对昨收）">{fmtPct(c.pct)}</span>
                 )}
               </div>
 
               <div className="mcard-spark">
-                <Sparkline values={c.series} height={42} />
+                <Sparkline values={c.series} height={46} />
               </div>
 
               <div className="mcard-foot">
@@ -292,7 +299,18 @@ export default function Terminal() {
                 ) : (
                   <span className="muted">点击设预警</span>
                 )}
-                {c.triggered && <span className="alert-badge">已触发</span>}
+                {c.triggered && !dismissed[c.key] && (
+                  <span
+                    className="alert-badge"
+                    title="点击清除提醒"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDismissed((d) => ({ ...d, [c.key]: true }));
+                    }}
+                  >
+                    已触发 ✕
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -305,10 +323,10 @@ export default function Terminal() {
       {/* 预警中心 */}
       <AlertCenter stocks={stocks} />
 
-      {/* 详情 / 设预警 */}
+      {/* 详情 / 设预警：Electron 下点卡片走独立大窗口，这里只作浏览器模式兜底 */}
       {detail && (
-        <Modal open title={`${detail.name} · 实时曲线`} onClose={() => setDetail(null)}>
-          <DetailPanel card={detail} onClose={() => setDetail(null)} />
+        <Modal open title={`${detail.name} · 实时曲线`} onClose={closeDetail}>
+          <DetailPanel card={detail} onClose={closeDetail} />
         </Modal>
       )}
 
@@ -320,78 +338,6 @@ export default function Terminal() {
             <div className="toast-body">{t.body}</div>
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void }) {
-  const key = card.key;
-  const unit = card.unit || (card.isGold ? '美元/盎司' : '');
-  const existing = getAlert(key);
-  const [upper, setUpper] = useState<string>(existing?.upper != null ? String(existing.upper) : '');
-  const [lower, setLower] = useState<string>(existing?.lower != null ? String(existing.lower) : '');
-  const [enabled, setEnabled] = useState<boolean>(existing?.enabled ?? true);
-
-  function save() {
-    const u = parseFloat(upper);
-    const l = parseFloat(lower);
-    setAlert(key, {
-      upper: Number.isFinite(u) ? u : undefined,
-      lower: Number.isFinite(l) ? l : undefined,
-      enabled,
-      name: card.name, // 把名称一并存下，预警列表不依赖标的是否仍在监控
-    });
-    onClose();
-  }
-  function delRule() {
-    removeAlert(key);
-    onClose();
-  }
-  function test() {
-    ensureAudio();
-    playAlertSound();
-    sendNotify(`🔔 ${card.name} 测试提醒`, `这是一条测试通知（现价 ${fmt(card.price ?? 0)}）`);
-  }
-
-  return (
-    <div>
-      <div className="form" style={{ marginBottom: 12 }}>
-        <span className="muted">现价</span>
-        <span className="big" style={{ fontSize: 20 }}>{card.price != null ? fmt(card.price) : '—'}</span>
-      </div>
-
-      {card.isGold ? (
-        <>
-          <StockChart gold name="COMEX黄金（国际金价）" />
-          <div className="muted" style={{ marginTop: 4 }}>
-            走势图数据源：COMEX 黄金期货连续（与伦敦金现货同价，美元/盎司）。实时价见上方「现价」。
-          </div>
-        </>
-      ) : (
-        <StockChart secid={card.symbol} name={card.name} prevClose={card.prevClose} />
-      )}
-
-      <div style={{ marginTop: 16 }}>
-        <div className="muted" style={{ marginBottom: 8 }}>到价提醒（价格触及即弹窗+声音+系统通知）</div>
-        <div className="form">
-          <label>突破上限 ↑</label>
-          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3950' : card.price != null ? '如 ' + fmt(card.price) : '输入价格'} value={upper} onChange={(e) => setUpper(e.target.value)} />
-          <label>跌破下限 ↓</label>
-          <input className="cell" type="number" step="0.01" placeholder={card.isGold ? '如 3850' : card.price != null ? '如 ' + fmt(card.price) : '输入价格'} value={lower} onChange={(e) => setLower(e.target.value)} />
-          {unit && <div className="muted" style={{ marginTop: 4 }}>单位：{unit}（与现价口径一致）</div>}
-        </div>
-        <div className="form" style={{ marginTop: 6 }}>
-          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} style={{ width: 'auto' }} />
-            启用该预警
-          </label>
-        </div>
-        <div className="form" style={{ marginTop: 10 }}>
-          <button className="primary" onClick={save}>保存预警</button>
-          <button onClick={test}>测试提醒</button>
-          {existing && <button className="danger" onClick={delRule}>删除预警</button>}
-        </div>
       </div>
     </div>
   );
@@ -426,7 +372,7 @@ function AlertCenter({ stocks }: { stocks: Record<string, Stock> }) {
       <div className="card">
         <h3>触发记录</h3>
         {log.length === 0 && <div className="muted">暂无触发记录。到价时会在此留痕。</div>}
-        {log.slice(0, 12).map((e: AlertLogEntry, i) => (
+        {log.slice(0, 5).map((e: AlertLogEntry, i) => (
           <div className="row" key={i}>
             <span>
               {e.name} <span className={e.dir === 'up' ? 'up' : 'down'}>{e.dir === 'up' ? '突破上限' : '跌破下限'}</span>

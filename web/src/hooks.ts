@@ -95,10 +95,12 @@ function keyByCode(list: Stock[]): Record<string, Stock> {
 // 实时盯盘引擎：每 intervalMs 拉一次合并接口，维护滚动曲线 + 触发阈值提醒
 export function useRealtimeMonitor(
   symbols: string[],
-  opts?: { withGold?: boolean; intervalMs?: number },
+  opts?: { withGold?: boolean; intervalMs?: number; silent?: boolean },
 ): RealtimeState {
   const withGold = opts?.withGold ?? true;
   const intervalMs = opts?.intervalMs ?? 5000;
+  // silent：只拉行情/画曲线，不做到价报警（供「拖出浮窗」用，避免与主窗口重复响铃/重复写触发记录）
+  const silent = opts?.silent ?? false;
   const symbolsKey = symbols.filter(Boolean).join(',');
 
   const [gold, setGold] = useState<Gold | null>(null);
@@ -124,7 +126,7 @@ export function useRealtimeMonitor(
       const id = toastId.current++;
       const title = `⚠ ${name} ${dir === 'up' ? '突破上限' : '跌破下限'}`;
       const body = `现价 ${fmt(price)}（预警线 ${fmt(threshold)}）`;
-      playAlertSound();
+      playAlertSound(dir);
       sendNotify(title, body);
       setToasts((t) => [...t, { id, title, body, kind: dir }]);
       pushAlertLog({ symbol, name, dir, price, threshold, time: Date.now() });
@@ -189,8 +191,8 @@ export function useRealtimeMonitor(
     } finally {
       setLoading(false);
     }
-    checkAlerts();
-  }, [symbolsKey, withGold, checkAlerts]);
+    if (!silent) checkAlerts();
+  }, [symbolsKey, withGold, silent, checkAlerts]);
 
   useEffect(() => {
     tick();

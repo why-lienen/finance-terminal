@@ -2,7 +2,7 @@
   "name": "finance-terminal",
   "version": "0.1.0",
   "private": true,
-  "description": "金融产品终端：股票/全板块基金/黄金行情与持仓收益看板（Web，开源可部署）",
+  "description": "金融终端 · macOS 菜单栏盯盘 App（Electron，内置行情代理与界面服务，自包含可打包）",
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"node --watch api/_server.js\" \"npm --prefix web run dev\"",
     "install:all": "npm install && npm --prefix api install && npm --prefix web install",

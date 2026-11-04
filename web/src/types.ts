@@ -97,3 +97,20 @@ export interface ChartPoint {
   x: string;
   y: number;
 }
+
+// 盯盘卡片的数据快照：主面板卡片、浏览器版详情 Modal、独立大图表窗口共用
+export interface CardData {
+  key: string;
+  symbol: string;
+  name: string;
+  isGold: boolean;
+  isFixed?: boolean;
+  unit?: string;
+  price: number | null;
+  pct: number | null;
+  change: number | null;
+  sub?: string;
+  series: number[];
+  prevClose?: number; // 昨收，用于分时图 0% 基准线
+  triggered: boolean;
+}

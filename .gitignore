@@ -15,3 +15,7 @@ dist/
 # vite 临时构建缓存
 *.timestamp-*.mjs
 vite.config.ts.timestamp-*.mjs
+
+# 打包 Electron 时的本地缓存/临时目录（由 pack 脚本使用，勿提交）
+.ecache/
+.etmp/

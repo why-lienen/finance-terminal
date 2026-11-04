@@ -36,14 +36,53 @@ function sma(values: number[], n: number): (number | null)[] {
   });
 }
 
-export default function StockChart({ secid, name, prevClose, gold }: { secid?: string; name?: string; prevClose?: number; gold?: boolean }) {
+interface ViewBox {
+  large: boolean;
+  boxW: number;
+  boxH: number;
+}
+
+export default function StockChart({
+  secid,
+  name,
+  prevClose,
+  gold,
+  livePrice,
+  large = false,
+}: {
+  secid?: string;
+  name?: string;
+  prevClose?: number;
+  gold?: boolean;
+  livePrice?: number;
+  large?: boolean;
+}) {
   const [period, setPeriod] = useState<Period>('分时');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [intraday, setIntraday] = useState<IntradayPoint[]>([]);
   const [kline, setKline] = useState<KP[]>([]);
   const [minuteSpan, setMinuteSpan] = useState<'recent' | 'all'>('recent'); // 1分钟默认最近30分钟
+  const [zoom, setZoom] = useState(1); // 缩放：0.5~2.5，越大蜡烛/点越宽越清晰
   const reqId = useRef(0);
+
+  // 独立大窗口模式：图表按窗口尺寸铺满（不再是小 Modal 里固定 320 高 + 横向滚动的小框）。
+  // 窗口可 resize，这里监听后重算宽高，SVG 原地更新而不卸载。
+  const [box, setBox] = useState(() => ({
+    w: Math.max(560, (typeof window !== 'undefined' ? window.innerWidth : 1000) - 44),
+    h: Math.max(360, (typeof window !== 'undefined' ? window.innerHeight : 760) - 300),
+  }));
+  useEffect(() => {
+    if (!large) return;
+    const on = () =>
+      setBox({
+        w: Math.max(560, window.innerWidth - 44),
+        h: Math.max(360, window.innerHeight - 300),
+      });
+    on();
+    window.addEventListener('resize', on);
+    return () => window.removeEventListener('resize', on);
+  }, [large]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +124,8 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid?: s
   }, [secid, period, gold]);
 
   const isIntraday = period === '分时' || period === '五日';
+  const dataLen = isIntraday ? intraday.length : kline.length;
+  const vb: ViewBox = { large, boxW: box.w, boxH: box.h };
 
   return (
     <div>
@@ -94,64 +135,107 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid?: s
             {p}
           </button>
         ))}
+        <span style={{ flex: 1 }} />
+        {/* 大窗口已铺满整个窗口，无需缩放条（缩放在小 Modal 里才需要） */}
+        {!large && (
+          <span className="chart-tools">
+            <span className="muted" style={{ fontSize: 11 }}>缩放</span>
+            <button className="zoom-btn" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}>−</button>
+            <span className="zoom-val">{Math.round(zoom * 100)}%</span>
+            <button className="zoom-btn" onClick={() => setZoom((z) => Math.min(2.5, +(z + 0.25).toFixed(2)))}>+</button>
+            <button className="zoom-btn" title="重置" onClick={() => setZoom(1)}>↺</button>
+          </span>
+        )}
       </div>
-      {loading && !intraday.length && !kline.length && (
+      {/* 关键：只在「还没有任何数据」时显示加载态。定时刷新时保持 SVG 挂载、原地更新数据，
+          否则每次 20s 刷新都会把整张图卸载成「加载中…」再重新挂载，就是用户看到的「一闪」。 */}
+      {!dataLen && loading && (
         <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>加载中…</div>
       )}
-      {err && <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>{err}</div>}
-      {!loading && !err && isIntraday && <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} />}
-      {!loading && !err && !isIntraday && <KlineView data={kline} period={period} minuteSpan={minuteSpan} onMinuteSpan={setMinuteSpan} />}
+      {!dataLen && !loading && err && (
+        <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>{err}</div>
+      )}
+      {dataLen > 0 && isIntraday && (
+        <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} zoom={zoom} livePrice={livePrice} {...vb} />
+      )}
+      {dataLen > 0 && !isIntraday && (
+        <KlineView data={kline} period={period} minuteSpan={minuteSpan} onMinuteSpan={setMinuteSpan} zoom={zoom} {...vb} />
+      )}
     </div>
   );
 }
 
-function IntradayView({ data, prevClose, five }: { data: IntradayPoint[]; prevClose?: number; five: boolean }) {
+function IntradayView({
+  data,
+  prevClose,
+  five,
+  zoom,
+  livePrice,
+  large = false,
+  boxW = 0,
+  boxH = 320,
+}: {
+  data: IntradayPoint[];
+  prevClose?: number;
+  five: boolean;
+  zoom: number;
+  livePrice?: number;
+  large?: boolean;
+  boxW?: number;
+  boxH?: number;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inited = useRef(false);
   if (!data.length) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>暂无分时数据（可能未开盘）</div>;
-  const W = 680;
-  const H = 300;
-  const padT = 12;
-  const padB = 22;
-  const padL = 44;
-  const padR = 52;
-  const volH = 54;
-  const gap = 10;
+  const H = large ? boxH : 320;
+  const padT = 12, padB = 22, padL = 46, padR = 54, volH = large ? 80 : 54, gap = 10;
   const priceH = H - padT - padB - volH - gap;
-  const innerW = W - padL - padR;
   const n = data.length;
-  const prices = data.map((d) => d.price);
+  // 小 Modal：固定槽宽 + 缩放 + 横向滚动；大窗口：按窗口宽度均分铺满
+  const innerW = large ? Math.max(400, boxW - padL - padR) : n * (3.2 * zoom);
+  const slot = innerW / n;
+  const plotW = padL + innerW + padR;
+  // 末点用实时价覆盖，保证分时图"最新"与卡片现价完全一致（消除两者价差误导）
+  const lastPrice = livePrice != null && Number.isFinite(livePrice) ? livePrice : data[n - 1].price;
+  const closes = data.map((d, i) => (i === n - 1 ? lastPrice : d.price));
   const avgs = data.map((d) => d.avg).filter((v) => Number.isFinite(v));
-  let lo = Math.min(...prices, ...avgs);
-  let hi = Math.max(...prices, ...avgs);
+  let lo = Math.min(...closes, ...avgs);
+  let hi = Math.max(...closes, ...avgs);
   if (Number.isFinite(prevClose as number)) {
     lo = Math.min(lo, prevClose as number);
     hi = Math.max(hi, prevClose as number);
   }
-  if (lo === hi) {
-    lo -= 1;
-    hi += 1;
-  }
-  const pad = (hi - lo) * 0.08;
-  lo -= pad;
-  hi += pad;
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
   const span = hi - lo || 1;
-  const xOf = (i: number) => padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const xOf = (i: number) => padL + i * slot + slot / 2;
   const yOf = (v: number) => padT + priceH - ((v - lo) / span) * priceH;
   const hasPrev = Number.isFinite(prevClose as number);
   const ref = hasPrev ? (prevClose as number) : data[0].price;
-  const up = data[n - 1].price >= ref;
+  const up = lastPrice >= ref;
   const stroke = up ? C.up : C.down;
-  const pricePts = data.map((d, i) => `${xOf(i).toFixed(1)},${yOf(d.price).toFixed(1)}`).join(' ');
+  const pricePts = closes.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ');
   const avgPts = data.map((d, i) => `${xOf(i).toFixed(1)},${yOf(d.avg).toFixed(1)}`).join(' ');
   const volMax = Math.max(...data.map((d) => d.vol), 1);
   const yVol = (v: number) => padT + priceH + gap + volH - (v / volMax) * volH;
   const pct = (v: number) => ((v - ref) / ref) * 100;
   const ticks = [0, 0.5, 1].map((k) => lo + span * k);
-  const xticks = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].filter(
-    (v, i, a) => a.indexOf(v) === i,
-  );
+  const stepX = Math.max(1, Math.ceil(n / 8));
+  const xticks: number[] = [];
+  for (let i = 0; i < n; i += stepX) xticks.push(i);
+  if (xticks[xticks.length - 1] !== n - 1) xticks.push(n - 1);
+  // 初次加载 / 切换 分时↔五日 时自动滚到最新处（放大后可横向滚动看历史）
+  useEffect(() => { inited.current = false; }, [five]);
+  useEffect(() => {
+    if (!inited.current && scrollRef.current && data.length) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      inited.current = true;
+    }
+  }, [data.length, five]);
   return (
     <div className="chart-wrap chart-plot">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="分时走势">
+      <div ref={scrollRef} style={{ overflowX: large ? 'hidden' : 'auto', maxWidth: '100%', paddingBottom: 4 }}>
+      <svg width={plotW} height={H} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="分时走势">
         <defs>
           <linearGradient id="intradayGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={stroke} stopOpacity="0.18" />
@@ -179,9 +263,9 @@ function IntradayView({ data, prevClose, five }: { data: IntradayPoint[]; prevCl
           strokeLinejoin="round"
           strokeLinecap="round"
         />
-        <circle cx={xOf(n - 1)} cy={yOf(data[n - 1].price)} r={3} fill={stroke} />
+        <circle cx={xOf(n - 1)} cy={yOf(lastPrice)} r={3} fill={stroke} />
         {data.map((d, i) => {
-          const bw = Math.max(0.5, (innerW / n) * 0.62);
+          const bw = Math.max(0.5, slot * 0.62);
           const y = yVol(d.vol);
           const h = padT + priceH + gap + volH - y;
           const c = d.price >= ref ? C.up : C.down;
@@ -192,10 +276,11 @@ function IntradayView({ data, prevClose, five }: { data: IntradayPoint[]; prevCl
           return <text key={i} x={xOf(i)} y={H - 6} fill={C.text} fontSize="10" textAnchor="middle">{lab}</text>;
         })}
       </svg>
+      </div>
       <div className="chart-legend">
         <span><i style={{ background: C.avg }} />均价 {fmt(data[n - 1].avg)}</span>
-        <span style={{ color: stroke, fontWeight: 700 }}>最新 {fmt(data[n - 1].price)}</span>
-        {hasPrev && <span style={{ color: stroke }}>{up ? '▲' : '▼'} {pct(data[n - 1].price).toFixed(2)}%</span>}
+        <span style={{ color: stroke, fontWeight: 700 }}>最新 {fmt(lastPrice)}</span>
+        {hasPrev && <span style={{ color: stroke }}>{up ? '▲' : '▼'} {pct(lastPrice).toFixed(2)}%</span>}
       </div>
     </div>
   );
@@ -206,54 +291,46 @@ interface KlineProps {
   period: Period;
   minuteSpan?: 'recent' | 'all';
   onMinuteSpan?: (v: 'recent' | 'all') => void;
+  zoom: number;
+  large?: boolean;
+  boxW?: number;
+  boxH?: number;
 }
-function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineProps) {
+function KlineView({
+  data,
+  period,
+  minuteSpan = 'recent',
+  onMinuteSpan,
+  zoom,
+  large = false,
+  boxW = 0,
+  boxH = 320,
+}: KlineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inited = useRef(false);
   const isMinute = period === '1分钟';
   const showAll = isMinute && minuteSpan === 'all';
-  const fixed = isMinute; // 1分钟一律固定宽度 + 横向滚动
-  // 切换 近1.5h/全天 时重新滚动到最新；日常刷新(数据更新)不抢走用户已滚动的位置
-  useEffect(() => {
-    inited.current = false;
-  }, [minuteSpan]);
-  useEffect(() => {
-    if (fixed && scrollRef.current && !inited.current && data.length) {
-      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
-      inited.current = true;
-    }
-  }, [fixed, minuteSpan, data.length]);
-  if (!data.length) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>暂无K线数据</div>;
-  const W = 680;
-  const H = 300;
-  const padT = 12;
-  const padB = 22;
-  const padL = 8;
-  const padR = 52;
-  const volH = 54;
-  const gap = 10;
-  const priceH = H - padT - padB - volH - gap;
-  // 分钟级：固定宽度蜡烛 + 横向滚动（每根足够宽才看得清走势）。
-  // 默认最近 30 分钟（30 根），点"全天"保留全部；其它周期自适应取最近 N 根填满宽度。
-  const RECENT_N = 30;
-  const N = 220; // 日/周/月 自适应取最近 N 根
-  const STRIDE = 9; // 每根蜡烛占宽(px)
+  const RECENT_N = 30; // 1分钟默认最近 30 分钟
+  const N = large ? 60 : 220; // 大窗口铺满时少取几根，避免蜡烛挤成一条线
   let view: KP[];
   if (isMinute) view = showAll ? data : data.length > RECENT_N ? data.slice(data.length - RECENT_N) : data;
   else view = data.length > N ? data.slice(data.length - N) : data;
   const n = view.length;
-  // 分钟级（固定滚动）按当前可见窗口缩放Y轴，避免最近1.5h被压在全天高低点中间看不清；其它周期 view≈data 无影响
-  const loSrc = fixed ? view : data;
+  if (!data.length) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>暂无K线数据</div>;
+  const H = large ? boxH : 320;
+  const padT = 12, padB = 22, padL = 8, padR = 54, volH = large ? 80 : 54, gap = 10;
+  const priceH = H - padT - padB - volH - gap;
+  const innerW = large ? Math.max(400, boxW - padL - padR) : n * (9 * zoom);
+  const slot = innerW / n;
+  const plotW = padL + innerW + padR;
+  const loSrc = isMinute ? view : data;
   const allLo = Math.min(...loSrc.map((d) => d.low));
   const allHi = Math.max(...loSrc.map((d) => d.high));
   const pad = (allHi - allLo) * 0.06;
   const L = allLo - pad;
   const U = allHi + pad;
   const span = U - L || 1;
-  const innerW = fixed ? n * STRIDE : W - padL - padR;
-  const plotW = fixed ? padL + innerW + padR : W;
-  const xOf = (i: number) =>
-    fixed ? padL + i * STRIDE + STRIDE / 2 : padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const xOf = (i: number) => padL + i * slot + slot / 2;
   const yOf = (v: number) => padT + priceH - ((v - L) / span) * priceH;
   const closes = data.map((d) => d.close);
   const ma5 = sma(closes, 5);
@@ -269,23 +346,23 @@ function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineP
   const up = view[n - 1].close >= view[0].close;
   const stroke = up ? C.up : C.down;
   const ticks = [0, 0.5, 1].map((k) => L + span * k);
-  let xticks: number[];
-  if (fixed) {
-    const step = Math.max(1, Math.ceil(n / 7));
-    xticks = [];
-    for (let i = 0; i < n; i += step) xticks.push(i);
-    if (xticks[xticks.length - 1] !== n - 1) xticks.push(n - 1);
-  } else {
-    xticks = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1].filter(
-      (v, i, a) => a.indexOf(v) === i,
-    );
-  }
-  const candleW = fixed ? Math.max(3, STRIDE * 0.7) : Math.max(1.8, (innerW / n) * 0.72);
+  const stepX = Math.max(1, Math.ceil(n / 8));
+  const xticks: number[] = [];
+  for (let i = 0; i < n; i += stepX) xticks.push(i);
+  if (xticks[xticks.length - 1] !== n - 1) xticks.push(n - 1);
+  const candleW = Math.max(2, slot * 0.72);
   const labelFmt = (s: string) => (isMinute ? s.slice(11, 16) : s.slice(5));
   const maLast = (arr: (number | null)[]) => {
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i] as number;
     return null;
   };
+  useEffect(() => { inited.current = false; }, [minuteSpan, period]);
+  useEffect(() => {
+    if (!inited.current && scrollRef.current && data.length) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+      inited.current = true;
+    }
+  }, [data.length, minuteSpan, period]);
   return (
     <div className="chart-wrap chart-plot">
       {isMinute && (
@@ -298,15 +375,14 @@ function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineP
           <button className={showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('all')}>全天</button>
         </div>
       )}
-      <div ref={scrollRef} style={fixed ? { overflowX: 'auto', maxWidth: '100%', paddingBottom: 4 } : undefined}>
-        <svg width={fixed ? plotW : '100%'} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="K线走势">
+      <div ref={scrollRef} style={{ overflowX: large ? 'hidden' : 'auto', maxWidth: '100%', paddingBottom: 4 }}>
+        <svg width={plotW} height={H} viewBox={`0 0 ${plotW} ${H}`} role="img" aria-label="K线走势">
           {ticks.map((tv, k) => (
             <g key={k}>
               <line x1={padL} y1={yOf(tv)} x2={padL + innerW} y2={yOf(tv)} stroke={C.grid} strokeWidth={1} strokeDasharray="3 4" />
               <text x={padL + innerW + 6} y={yOf(tv) + 4} fill={C.text} fontSize="10">{fmt(tv)}</text>
             </g>
           ))}
-          {/* 蜡烛：实体 open→close，影线 high→low（A股：涨红跌绿） */}
           {view.map((d, i) => {
             const x = xOf(i);
             const yO = yOf(d.open);

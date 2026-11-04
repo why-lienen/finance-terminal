@@ -59,6 +59,6 @@ export function loadAlertLog(): AlertLogEntry[] {
 export function pushAlertLog(e: AlertLogEntry) {
   const list = loadAlertLog();
   list.unshift(e);
-  if (list.length > 50) list.length = 50;
+  if (list.length > 5) list.length = 5; // 只保留最近 5 条触发记录，避免无限增长
   localStorage.setItem(LOG_KEY, JSON.stringify(list));
 }
