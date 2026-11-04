@@ -17,7 +17,8 @@
 //   - 想用线上已部署版本（无需本地 dev server），启动时指定环境变量：
 //       APP_URL=https://你的vercel地址/ npm run desktop
 //   - backgroundThrottling:false 保证窗口隐藏后也不降速，5 秒轮询与到价提醒持续运行。
-const { app, BrowserWindow, Tray, nativeImage, screen, Menu } = require('electron');
+const { app, BrowserWindow, Tray, nativeImage, screen, Menu, ipcMain } = require('electron');
+const path = require('path');
 
 // 加载盯盘终端（首页即 Terminal 单页）
 const APP_URL = process.env.APP_URL || 'http://localhost:5173/';
@@ -32,17 +33,19 @@ function createWindow() {
     show: false, // 默认隐藏，点菜单栏再展开
     frame: false,
     resizable: true,
-    alwaysOnTop: true,
+    alwaysOnTop: true, // 常驻最上层：切到别的 app 也一直可见
     skipTaskbar: true,
+    transparent: true, // 透明常驻：窗口背景透出桌面，只看得到卡片本身
+    backgroundColor: '#00000000',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false, // 关键：窗口隐藏后也不降速，保证 5s 轮询与到价提醒持续运行
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
   win.loadURL(APP_URL);
-  // 失焦自动收起
-  win.on('blur', () => win && win.hide());
+  // 注意：不再「失焦自动收起」——用户要的是常驻可见；改为由右上角 ✕ 手动收起（见 preload/appShell.close）
 }
 
 function positionWindow() {
@@ -58,6 +61,11 @@ function positionWindow() {
 }
 
 app.whenReady().then(() => {
+  // 前端「收起窗口」按钮通过 preload 发送 app:close
+  ipcMain.on('app:close', () => {
+    if (win) win.hide();
+  });
+
   createWindow();
 
   tray = new Tray(nativeImage.createEmpty());

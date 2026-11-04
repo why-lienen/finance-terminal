@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getSearch, type SearchResult } from '../api/market';
 import { loadWatch, saveWatch } from '../store/local';
-import type { WatchItem } from '../types';
+import type { WatchItem, Stock } from '../types';
 import { useRealtimeMonitor } from '../hooks';
 import { cls, fmt, fmtPct } from '../utils';
 import Sparkline from '../components/Sparkline';
@@ -50,6 +50,8 @@ export default function Terminal() {
   const [soundOn, setSoundOn] = useState(true);
   const [notifyState, setNotifyState] = useState<NotificationPermission>('default');
   const boxRef = useRef<HTMLDivElement>(null);
+  // 仅在 Electron 菜单栏 app 内（preload 注入了 window.appShell）显示「收起窗口」按钮
+  const isElectron = typeof window !== 'undefined' && !!(window as any).appShell;
 
   const stockWatch = useMemo(() => watch.filter((x) => x.type === 'stock'), [watch]);
   const symbols = useMemo(
@@ -235,6 +237,9 @@ export default function Terminal() {
           ) : (
             <button onClick={enableNotify}>开启系统通知</button>
           )}
+          {isElectron && (
+            <button className="app-close" title="收起盯盘窗口" onClick={() => (window as any).appShell.close()}>✕</button>
+          )}
         </div>
       </div>
 
@@ -298,7 +303,7 @@ export default function Terminal() {
       </div>
 
       {/* 预警中心 */}
-      <AlertCenter />
+      <AlertCenter stocks={stocks} />
 
       {/* 详情 / 设预警 */}
       {detail && (
@@ -335,6 +340,7 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
       upper: Number.isFinite(u) ? u : undefined,
       lower: Number.isFinite(l) ? l : undefined,
       enabled,
+      name: card.name, // 把名称一并存下，预警列表不依赖标的是否仍在监控
     });
     onClose();
   }
@@ -391,11 +397,14 @@ function DetailPanel({ card, onClose }: { card: CardData; onClose: () => void })
   );
 }
 
-function AlertCenter() {
+function AlertCenter({ stocks }: { stocks: Record<string, Stock> }) {
   const alerts = loadAlerts();
   const log = loadAlertLog();
   const NAME_MAP: Record<string, string> = { [GOLD_KEY]: '国际金价', CL00Y: '美油 WTI', UDI: '美元指数' };
   const UNIT_MAP: Record<string, string> = { [GOLD_KEY]: '美元/盎司', CL00Y: '美元/桶' };
+  // 预警键可能是 GOLD/CL00Y/UDI（固定资产）或 A股代码（如 002565）。
+  // 优先用创建预警时存的名称，其次已知名称映射，其次实时行情名称，最后兜底显示代码。
+  const nameOf = (key: string, r: any) => r?.name || NAME_MAP[key] || stocks[key]?.name || key;
   const entries = Object.entries(alerts).filter(([, r]) => r && (r.upper != null || r.lower != null));
   return (
     <div className="grid cols-2" style={{ marginTop: 18 }}>
@@ -404,7 +413,7 @@ function AlertCenter() {
         {entries.length === 0 && <div className="muted">还没有设置预警，点击任意卡片右上角区域设定价格提醒。</div>}
         {entries.map(([key, r]) => (
           <div className="row" key={key}>
-            <span>{NAME_MAP[key] || key}</span>
+            <span>{nameOf(key, r)}</span>
             <span>
               {r.upper != null && <span className="up">↑{fmt(r.upper)} </span>}
               {r.lower != null && <span className="down">↓{fmt(r.lower)}</span>}

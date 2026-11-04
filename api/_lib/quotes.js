@@ -53,20 +53,46 @@ function secidToTencent(secid) {
   return prefix + code;
 }
 
+// 腾讯源只支持 A股(sh/sz)；商品/指数(如 100.UDI / 102.CL00Y)必须走东方财富。
+// 之前“腾讯只回了 A股就让 list.length>0 直接返回”，会把商品标的悄悄丢弃。
+// 改为按市场号拆分：0/1 走腾讯(兜底东方财富)，其余直接走东方财富，互不干扰。
+function splitBySource(secids) {
+  const cn = [];
+  const other = [];
+  for (const s of secids) {
+    const m = String(s).split('.')[0];
+    if (m === '0' || m === '1') cn.push(s);
+    else other.push(s);
+  }
+  return { cn, other };
+}
+
 async function getStocks(secids) {
   const key = 'stocks:' + secids.join(',');
   const cached = getCached(key);
   if (cached) return cached;
+  const { cn, other } = splitBySource(secids);
+  const parts = await Promise.all([
+    cn.length ? getStocksCn(cn) : Promise.resolve([]),
+    other.length ? getStocksPush2(other) : Promise.resolve([]),
+  ]);
+  const list = [].concat(parts[0], parts[1]);
+  if (list.length) { setCache(key, list); return list; }
+  return getCached(key) || [];
+}
+
+// A股：腾讯为主、东方财富兜底（此分支只含 0/1 市场，不会误丢商品）
+async function getStocksCn(secids) {
   try {
     const list = await getStocksTencent(secids);
-    if (list.length) { setCache(key, list); return list; }
+    if (list.length) return list;
     throw new Error('empty');
   } catch (e) {
     try {
       const list = await getStocksPush2(secids);
-      if (list.length) { setCache(key, list); return list; }
+      if (list.length) return list;
     } catch (_) {}
-    return getCached(key) || [];
+    return [];
   }
 }
 

@@ -3,6 +3,7 @@ export interface AlertRule {
   upper?: number; // 价格 >= upper 触发（突破上限）
   lower?: number; // 价格 <= lower 触发（跌破下限）
   enabled: boolean;
+  name?: string; // 标的名称（创建预警时一并保存，列表展示优先用，避免标的被移出监控后只显示代码）
 }
 
 export interface AlertLogEntry {
