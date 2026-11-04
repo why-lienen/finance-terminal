@@ -29,20 +29,32 @@ export function playAlertSound() {
   if (!enabled) return;
   ensureAudio();
   if (!ctx) return;
-  const t0 = ctx.currentTime;
-  // 两声短蜂鸣（高频→中频）提醒更明显
-  for (let i = 0; i < 2; i++) {
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    const start = t0 + i * 0.28;
-    o.type = 'sine';
-    o.frequency.value = i === 0 ? 880 : 620;
-    g.gain.setValueAtTime(0.0001, start);
-    g.gain.exponentialRampToValueAtTime(0.35, start + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.start(start);
-    o.stop(start + 0.24);
+  // 紧急提醒音：3 轮双音高音警报（方波比正弦感知更响亮、更抓耳），整体约 1.1 秒。
+  const peak = 0.4; // 比旧版 0.35 更高、且方波自带亮度
+  const dur = 0.18;
+  const toneGap = 0.14; // 两个音之间
+  const cycleGap = 0.16; // 每轮之间
+  let t = ctx.currentTime;
+  for (let c = 0; c < 3; c++) {
+    t = beep(ctx, t, 1046.5, 'square', dur, peak); // C6
+    t += toneGap;
+    t = beep(ctx, t, 1568.0, 'square', dur, peak); // G6
+    t += cycleGap;
   }
+}
+
+// 单个音：带缓入缓出包络，避免爆音；方波提供明亮高亢的警报感
+function beep(ctx: AudioContext, start: number, freq: number, type: OscillatorType, dur: number, peak: number) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.connect(g);
+  g.connect(ctx.destination);
+  o.start(start);
+  o.stop(start + dur + 0.03);
+  return start + dur;
 }

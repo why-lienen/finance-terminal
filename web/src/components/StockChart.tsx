@@ -42,7 +42,7 @@ export default function StockChart({ secid, name, prevClose, gold }: { secid?: s
   const [err, setErr] = useState<string | null>(null);
   const [intraday, setIntraday] = useState<IntradayPoint[]>([]);
   const [kline, setKline] = useState<KP[]>([]);
-  const [minuteSpan, setMinuteSpan] = useState<'recent' | 'all'>('recent'); // 1分钟默认近1.5h
+  const [minuteSpan, setMinuteSpan] = useState<'recent' | 'all'>('recent'); // 1分钟默认最近30分钟
   const reqId = useRef(0);
 
   useEffect(() => {
@@ -234,8 +234,8 @@ function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineP
   const gap = 10;
   const priceH = H - padT - padB - volH - gap;
   // 分钟级：固定宽度蜡烛 + 横向滚动（每根足够宽才看得清走势）。
-  // 默认近 1.5 小时（90 根），点"全天"保留全部；其它周期自适应取最近 N 根填满宽度。
-  const RECENT_N = 90;
+  // 默认最近 30 分钟（30 根），点"全天"保留全部；其它周期自适应取最近 N 根填满宽度。
+  const RECENT_N = 30;
   const N = 220; // 日/周/月 自适应取最近 N 根
   const STRIDE = 9; // 每根蜡烛占宽(px)
   let view: KP[];
@@ -271,7 +271,7 @@ function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineP
   const ticks = [0, 0.5, 1].map((k) => L + span * k);
   let xticks: number[];
   if (fixed) {
-    const step = Math.max(1, Math.ceil(n / 9));
+    const step = Math.max(1, Math.ceil(n / 7));
     xticks = [];
     for (let i = 0; i < n; i += step) xticks.push(i);
     if (xticks[xticks.length - 1] !== n - 1) xticks.push(n - 1);
@@ -291,10 +291,10 @@ function KlineView({ data, period, minuteSpan = 'recent', onMinuteSpan }: KlineP
       {isMinute && (
         <div className="minute-switch" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <span className="muted" style={{ fontSize: 11 }}>
-            {showAll ? `1分钟走势 · 全天（共 ${n} 根，可滑动）` : `1分钟走势 · 近 ${Math.round((n / 60) * 10) / 10} 小时（共 ${n} 根，可滑动）`}
+            {showAll ? `1分钟走势 · 全天（共 ${n} 根，可滑动）` : `1分钟走势 · 最近 ${n} 分钟（共 ${n} 根，可滑动）`}
           </span>
           <span style={{ flex: 1 }} />
-          <button className={!showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('recent')}>近1.5h</button>
+          <button className={!showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('recent')}>近30分钟</button>
           <button className={showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('all')}>全天</button>
         </div>
       )}
