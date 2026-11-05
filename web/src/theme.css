@@ -45,14 +45,16 @@ body {
 
 /* ===== 顶栏 ===== */
 .topbar {
-  display: flex; align-items: center; gap: 28px;
+  display: flex; align-items: center; gap: 16px;
   padding: 0 22px; height: 56px;
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 20;
 }
-.brand { font-weight: 800; font-size: 16px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+/* 顶栏防溢出：窗口被拉窄时只压缩「行情延迟」标签，右侧操作区（🔊/🪟/✕/时钟）永不收缩，
+   保证 ✕ 始终可见（500px 宽时实测顶栏曾溢出 82px，✕ 被挤到窗口边缘看不见）。 */
+.brand { flex: 0 0 auto; font-weight: 800; font-size: 16px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
 .brand .dot { color: var(--accent); }
 .brand .badge {
   font-size: 10px; font-weight: 700; color: #0a0c10; background: var(--accent);
@@ -60,6 +62,7 @@ body {
 }
 .topbar nav { display: flex; gap: 4px; flex: 1; }
 .freshness {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   font-size: 11px; font-weight: 600; color: var(--accent);
   background: rgba(217, 149, 42, 0.12); border: 1px solid rgba(217, 149, 42, 0.35);
   padding: 2px 9px; border-radius: 999px; letter-spacing: .3px; white-space: nowrap;
@@ -73,7 +76,7 @@ body {
 .topbar .clock { color: var(--text-dim); font-family: var(--mono); font-size: 12px; margin-left: 6px; }
 
 /* 顶栏右侧操作区（声音 / 透明 / 收起） */
-.top-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.top-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .icon-btn {
   width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   font-size: 15px; border-radius: 8px; background: var(--bg-elev); border: 1px solid var(--border); cursor: pointer;
@@ -308,6 +311,24 @@ button.danger:hover { background: var(--up); color: #fff; }
    「需要点击 / 输入 / 滚动 / 选中」的元素单独标为 no-drag，其余空白处自动可拖。
    注意：drag 区域会吞掉点击与文本选择，所以下列排除项必须齐全。 */
 .electron-app { -webkit-app-region: drag; }
+
+/* ⚠️ 修复「滑到页面下面就拉不动窗口」：
+   html/body/#root 是 height:100%，body 的布局盒只有一屏高，而 .app 会随内容撑到整篇文档
+   （实测 500×720 视口：body 高 705，.app 高 947）。Electron 的 draggable region 按元素布局
+   矩形生成，文档滚动后溢出的内容不在 body 的 region 内，于是下面点哪都拖不动。
+   给 .app 显式声明 drag（它的盒覆盖整篇文档）+ 下面两条固定边缘拖拽条，双保险覆盖滚动后的区域。 */
+.electron-app .app { -webkit-app-region: drag; }
+.electron-app .topbar { -webkit-app-region: drag; }
+
+/* 固定边缘拖拽条：position:fixed 不随页面滚动移动，region 永远稳定；
+   只占窗口左右各 10px 的 padding 空白区，不挡卡片 / 按钮 / 输入框 / Toast。 */
+.electron-app .drag-rail {
+  position: fixed; top: 56px; bottom: 0; width: 10px;
+  z-index: 90; background: transparent; cursor: grab;
+  -webkit-app-region: drag;
+}
+.electron-app .drag-rail-l { left: 0; }
+.electron-app .drag-rail-r { right: 0; }
 
 .electron-app button,
 .electron-app input,

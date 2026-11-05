@@ -122,9 +122,17 @@ async function pickAppUrl() {
 }
 
 function createWindow(url) {
+  const wa = screen.getPrimaryDisplay().workArea;
+  // 默认尺寸按当前界面实测：820×780 时顶栏完整（✕ 不被挤出）、3 张盯盘卡一行、
+  // 预警中心全部可见，内容总高正好等于窗口高 → 打开即「默认展示所有内容」，无需滚动。
+  // 小屏按工作区等比收敛，但保底 700×560（低于 700 宽顶栏会挤掉 ✕；前端另有 flex 防溢出兜底）。
+  const width = Math.max(700, Math.min(820, wa.width - 16));
+  const height = Math.max(560, Math.min(780, wa.height - 16));
   win = new BrowserWindow({
-    width: 500,
-    height: 720,
+    width,
+    height,
+    minWidth: 700,   // 防止用户手动缩窄后又把 ✕ 挤没
+    minHeight: 520,
     show: false, // 默认隐藏，点菜单栏再展开
     frame: false,
     resizable: true,
@@ -147,12 +155,14 @@ function positionWindow() {
   if (!win) return;
   const cursor = screen.getCursorScreenPoint();
   const disp = screen.getDisplayNearestPoint(cursor);
-  const { width } = disp.workAreaSize;
-  const [w, h] = win.getSize();
-  // 贴在菜单栏正下方、靠右
-  const x = width - w - 8;
-  const y = 24;
-  win.setPosition(x, y);
+  // 用 workArea（含 x/y 原点）而不是只用 workAreaSize：外接显示器 / 刘海屏时
+  // workArea.x 不为 0，旧写法会把窗口算到主屏坐标上导致跑偏甚至整窗出屏。
+  const wa = disp.workArea;
+  const [w] = win.getSize();
+  // 贴当前屏幕工作区右上角，且保证窗口整体不越出屏幕边界
+  const x = Math.max(wa.x + 8, wa.x + wa.width - w - 8);
+  const y = wa.y + 8;
+  win.setPosition(Math.round(x), Math.round(y));
 }
 
 // 拖出某张盯盘卡 → 开一个独立、最上层、可拖动的小浮窗（实时价格 + 迷你走势）

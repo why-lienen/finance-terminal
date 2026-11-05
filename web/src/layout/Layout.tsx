@@ -49,6 +49,14 @@ export default function Layout() {
 
   return (
     <div className="app">
+      {/* 固定边缘拖拽条：不随页面滚动，滚到任何位置都能抓住窗口边缘平移；
+          只占左右 10px 空白 padding，不挡卡片 / 按钮 / 输入。 */}
+      {isElectron && (
+        <>
+          <div className="drag-rail drag-rail-l" aria-hidden="true" />
+          <div className="drag-rail drag-rail-r" aria-hidden="true" />
+        </>
+      )}
       <header className="topbar">
         <div className="brand">
           盯盘<span className="dot">终端</span>
