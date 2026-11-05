@@ -39,40 +39,61 @@ export function getFundHistory(code: string, range = '1y') {
   return api.get<{ date: string; nav: number; acc: number }[]>('/market/fund/history?code=' + code + '&range=' + range).then((r) => r.data);
 }
 
+// 1 分钟 K 线的末端可能由「新浪实时报价自采补点」拼接而来（东财对国际商品滞后约 10 分钟）。
+// realtime=true 的 bar 会在图表里用虚线/半透明区分；asOf 是序列最后一根的时间。
+export interface KlineBar {
+  date: string;
+  open: number;
+  close: number;
+  high: number;
+  low: number;
+  vol: number;
+  realtime?: boolean;
+}
+export interface KlineResult {
+  code: string;
+  name: string;
+  period: string;
+  list: KlineBar[];
+  asOf?: string | null;
+  realtimeCount?: number;
+  realtimeFrom?: string;
+  sourceNote?: string;
+}
+
 export function getKline(secid: string, period = 'day', limit = 60) {
   return api
-    .get<{ code: string; name: string; period: string; list: { date: string; open: number; close: number; high: number; low: number; vol: number }[] }>(
-      '/market/stock/kline?secid=' + secid + '&period=' + period + '&limit=' + limit,
-    )
+    .get<KlineResult>('/market/stock/kline?secid=' + secid + '&period=' + period + '&limit=' + limit)
     .then((r) => r.data);
 }
 
 export interface IntradayPoint {
   t: string; // "2026-11-03 09:30"
   price: number;
-  avg: number; // 均价
+  avg: number | null; // 均价（指数类标的无均价时为 null，前端须跳过，不可当作 0 参与 Y 轴）
   vol: number; // 成交量(手)
+}
+export interface IntradayResult {
+  code: string;
+  name: string;
+  days: number;
+  list: IntradayPoint[];
+  asOf?: string | null;
 }
 export function getIntraday(secid: string, days = 1) {
   return api
-    .get<{ code: string; name: string; days: number; list: IntradayPoint[] }>(
-      '/market/stock/intraday?secid=' + secid + '&days=' + days,
-    )
+    .get<IntradayResult>('/market/stock/intraday?secid=' + secid + '&days=' + days)
     .then((r) => r.data);
 }
 
 // 国际金价历史走势：COMEX 黄金期货连续（与伦敦金同价，美元/盎司）
 export function getGoldIntraday(days = 1) {
   return api
-    .get<{ code: string; name: string; days: number; list: IntradayPoint[] }>(
-      '/market/gold/intraday?days=' + days,
-    )
+    .get<IntradayResult>('/market/gold/intraday?days=' + days)
     .then((r) => r.data);
 }
 export function getGoldKline(period = 'day', limit = 120) {
   return api
-    .get<{ code: string; name: string; period: string; list: { date: string; open: number; close: number; high: number; low: number; vol: number }[] }>(
-      '/market/gold/kline?period=' + period + '&limit=' + limit,
-    )
+    .get<KlineResult>('/market/gold/kline?period=' + period + '&limit=' + limit)
     .then((r) => r.data);
 }

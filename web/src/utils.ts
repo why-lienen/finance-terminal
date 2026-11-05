@@ -1,4 +1,4 @@
-export function fmt(n?: number): string {
+export function fmt(n?: number | null): string {
   if (n == null || isNaN(n)) return '-';
   return n.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }

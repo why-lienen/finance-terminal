@@ -72,7 +72,7 @@ function DetailPanelBase({
         <>
           <StockChart gold name="COMEX黄金（国际金价）" livePrice={card.price ?? undefined} large={chartLarge} />
           <div className="muted" style={{ marginTop: 4 }}>
-            走势图数据源：COMEX 黄金期货连续（与伦敦金现货同价，美元/盎司）。实时价见上方「现价」。
+            走势图数据源：COMEX 黄金期货连续（东财，源端约 10 分钟延迟）；1 分钟图末端由新浪零延迟报价按分钟自采补点，标「数据截至 HH:MM」，虚线区分。实时价见上方「现价」。
           </div>
         </>
       ) : (

@@ -64,7 +64,12 @@ export default function ChartWindow({ secid, name, code, kind, prevClose, unit, 
         <div className="chart-head-price">
           <span className="big">{price != null ? fmt(price) : '—'}</span>
           {pct != null && <span className={'tag ' + cls(pct)} title="今日涨跌幅（相对昨收）">{fmtPct(pct)}</span>}
-          <span className="muted chart-head-hint">行情延迟约 10–30 秒 · 非实时</span>
+          <span
+            className="muted chart-head-hint"
+            title="东财对黄金 / WTI 的 1 分钟 K 线恒定滞后约 10 分钟；末端由新浪零延迟报价按分钟自采补点，图表会标注数据截至时间。非交易所实时推送。"
+          >
+            源端约 10 分钟 · 末端实时补点
+          </span>
         </div>
         <button className="chart-close" title="关闭图表窗口" onClick={close}>✕</button>
       </div>

@@ -34,6 +34,7 @@ export default function FloatWidget({ secid, name, code, kind }: Props) {
   const pct = isGold ? gold?.pct : stocks[code]?.pct;
 
   const [points, setPoints] = useState<Point[]>([]);
+  const [asOf, setAsOf] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +45,7 @@ export default function FloatWidget({ secid, name, code, kind }: Props) {
         const list = (d.list || []).slice(-RECENT).map((x) => ({ t: x.date, v: x.close }));
         // 失败 / 空数据时保留上一次的点，不清空，避免浮窗闪烁
         if (list.length) setPoints(list);
+        setAsOf(d.asOf ?? (d.list?.length ? d.list[d.list.length - 1].date : null));
       } catch (_) {
         /* 保留上一次数据 */
       }
@@ -88,7 +90,9 @@ export default function FloatWidget({ secid, name, code, kind }: Props) {
           <MinuteSpark points={points} height={140} />
         </div>
 
-        <div className="float-foot muted">1分钟走势 · 最近10分钟 · 每1分钟更新 · 拖动标题栏移动</div>
+        <div className="float-foot muted">
+          1分钟走势 · 最近10分钟{asOf ? ` · 数据截至 ${asOf.slice(11, 16)}` : ''} · 拖动标题栏移动
+        </div>
       </div>
     </div>
   );

@@ -31,6 +31,11 @@ async function handler(req, res) {
   try {
     if (path === '/api/health') return send(res, 200, { ok: true });
 
+    // 诊断：新浪实时补点源的状态（末端时间 / bar 数 / 与本地时间差），便于自测回归
+    if (path === '/api/market/realtime/status') {
+      return send(res, 200, quotes.getRealtimeStatus());
+    }
+
     if (path === '/api/market/stocks') {
       const secids = (q.get('secids') || '').split(',').filter(Boolean);
       if (!secids.length) return send(res, 200, []);

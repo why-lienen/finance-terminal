@@ -4,6 +4,7 @@
 const CACHE_TTL = 30 * 1000;
 const HISTORY_TTL = 6 * 60 * 60 * 1000; // 历史净值/K线变化慢，缓存久一点
 const cache = new Map(); // key -> { ts, data }
+const sinaRealtime = require('./sinaRealtime');
 
 async function fetchText(url, headers = {}, retries = 2, timeout = 8000) {
   let lastErr;
@@ -271,7 +272,7 @@ async function getFundHistory(code, range = '1y') {
 
 // K线（东方财富 push2his）：股票/指数/黄金通用，secid 如 1.600519 / 113.Au99.99
 // period: day=101 week=102 month=103；返回 [{date, open, close, high, low, vol}]
-async function getKline(secid, period = 'day', limit = 60) {
+async function getKlineRaw(secid, period = 'day', limit = 60) {
   const kltMap = { day: 101, week: 102, month: 103, '1min': 1, '5m': 5, '15m': 21, '30m': 31, '60m': 61 };
   const klt = kltMap[period] || 101;
   const key = `kline:${secid}:${period}:${limit}`;
@@ -306,6 +307,42 @@ async function getKline(secid, period = 'day', limit = 60) {
   }
 }
 
+// 1 分钟 K 线的「末端实时补点」：
+// 东财免费源对国际商品（101.GC00Y / 102.CL00Y）的 1 分钟 K 线恒定滞后约 10 分钟，
+// 这里把新浪零延迟快照自采的分钟 bar 追加到东财历史末端，让图走到当前分钟。
+// 只对 1min + 这两个 secid 生效；美元指数 100.UDI 东财本来就实时，不参与。
+// 关键：东财历史部分仍走 getKlineRaw 的 20 秒缓存，实时段每次现算，不会被缓存僵住。
+async function getKline(secid, period = 'day', limit = 60) {
+  const base = await getKlineRaw(secid, period, limit);
+  const list = base.list || [];
+  const asOf = list.length ? list[list.length - 1].date : null;
+
+  if (period !== '1min' || !sinaRealtime.MAP[secid] || !list.length) {
+    return { ...base, asOf, realtimeCount: 0 };
+  }
+  try {
+    const extra = sinaRealtime.getAlignedBars(secid, list);
+    if (!extra.length) return { ...base, asOf, realtimeCount: 0 };
+    // concat 生成新数组，不污染 getKlineRaw 的缓存对象
+    const merged = list.concat(extra);
+    return {
+      ...base,
+      list: merged,
+      asOf: merged[merged.length - 1].date,
+      realtimeCount: extra.length,
+      realtimeFrom: extra[0].date,
+      sourceNote: '东财历史 1 分钟 K 线（源端约 10 分钟延迟）+ 新浪实时报价自采补点',
+    };
+  } catch (e) {
+    return { ...base, asOf, realtimeCount: 0 };
+  }
+}
+
+// 诊断用：暴露新浪自采源的实时状态（末端时间、bar 数、与本地时间差）
+function getRealtimeStatus() {
+  return sinaRealtime.getStatus();
+}
+
 // 分时（全天/多日）：东方财富 push2his trends2，返回每根分钟的 最新价/均价/成交量
 // 用于"分时/五日"走势图；days=1 为当日，days=5 为最近5个交易日拼接
 async function getIntraday(secid, days = 1) {
@@ -322,19 +359,27 @@ async function getIntraday(secid, days = 1) {
     const list = trends
       .map((s) => {
         const p = String(s).split(',');
+        const price = parseFloat(p[3]); // 最新价 (f53)
+        const avgRaw = parseFloat(p[7]); // 均价 (f58)
+        const volRaw = parseFloat(p[5]); // 成交量(手) (f56)
+        // 指数类标的（如 100.UDI 美元指数）东财 trends2 的 f58 均价与 f56 成交量恒为 0，
+        // 那是「无此字段」而非真实均价/成交量。若原样透传，前端会把 0 纳入 Y 轴范围，
+        // 把 101.x 的价格压成一条水平直线（表现为「分时/五日一直不动」）。
+        // 这里统一归一化：无效均价 -> null（语义明确），无效成交量 -> 0，非法价格点直接丢弃。
         return {
           t: p[0], // "2026-11-03 09:30"
-          price: parseFloat(p[3]), // 最新价 (f53)
-          avg: parseFloat(p[7]), // 均价 (f58)
-          vol: parseFloat(p[5]), // 成交量(手) (f56)
+          price,
+          avg: Number.isFinite(avgRaw) && avgRaw > 0 ? avgRaw : null,
+          vol: Number.isFinite(volRaw) && volRaw > 0 ? volRaw : 0,
         };
       })
-      .filter((x) => Number.isFinite(x.price));
-    const data = { code: json?.data?.code || secid, name: json?.data?.name || '', days, list };
+      .filter((x) => Number.isFinite(x.price) && x.price > 0);
+    const asOf = list.length ? list[list.length - 1].t : null;
+    const data = { code: json?.data?.code || secid, name: json?.data?.name || '', days, list, asOf };
     setCache(key, data, 15000); // 分时变化快，短缓存便于实时刷新
     return data;
   } catch (e) {
-    return getCacheSoft(key) || { code: secid, name: '', days, list: [] };
+    return getCacheSoft(key) || { code: secid, name: '', days, list: [], asOf: null };
   }
 }
 
@@ -440,4 +485,7 @@ async function getGold() {
   return { price: 0, name: '伦敦金 XAU/USD', code: 'XAU', source: 'none', stale: true, unit: '美元/盎司', note: '行情接口暂不可用' };
 }
 
-module.exports = { getStocks, getFundEst, getFundRank, getFundHistory, getKline, getIntraday, getGold, getSearch };
+module.exports = {
+  getStocks, getFundEst, getFundRank, getFundHistory,
+  getKline, getIntraday, getGold, getSearch, getRealtimeStatus,
+};

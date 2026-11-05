@@ -12,6 +12,7 @@ interface KP {
   high: number;
   low: number;
   vol: number;
+  realtime?: boolean; // 新浪实时报价自采补点（与东财历史 bar 区分显示）
 }
 
 // 颜色（浅色主题下清晰的金融配色）
@@ -62,6 +63,8 @@ export default function StockChart({
   const [err, setErr] = useState<string | null>(null);
   const [intraday, setIntraday] = useState<IntradayPoint[]>([]);
   const [kline, setKline] = useState<KP[]>([]);
+  const [asOf, setAsOf] = useState<string | null>(null); // 序列末端时间（数据截至 HH:MM）
+  const [realtimeCount, setRealtimeCount] = useState(0); // 末端实时补点根数
   const [minuteSpan, setMinuteSpan] = useState<'recent' | 'all'>('recent'); // 1分钟默认最近30分钟
   const [zoom, setZoom] = useState(1); // 缩放：0.5~2.5，越大蜡烛/点越宽越清晰
   const reqId = useRef(0);
@@ -97,7 +100,11 @@ export default function StockChart({
           const d = gold
             ? await getGoldIntraday(period === '五日' ? 5 : 1)
             : await getIntraday(secid, period === '五日' ? 5 : 1);
-          if (!cancelled && id === reqId.current) setIntraday(d.list || []);
+          if (!cancelled && id === reqId.current) {
+            setIntraday(d.list || []);
+            setAsOf(d.asOf ?? (d.list?.length ? d.list[d.list.length - 1].t : null));
+            setRealtimeCount(0);
+          }
         } else {
           const map: Record<string, 'day' | 'week' | 'month' | '1min'> = {
             日K: 'day',
@@ -106,7 +113,11 @@ export default function StockChart({
             '1分钟': '1min',
           };
           const d = gold ? await getGoldKline(map[period], 300) : await getKline(secid, map[period], 120);
-          if (!cancelled && id === reqId.current) setKline(d.list || []);
+          if (!cancelled && id === reqId.current) {
+            setKline(d.list || []);
+            setAsOf(d.asOf ?? (d.list?.length ? d.list[d.list.length - 1].date : null));
+            setRealtimeCount(d.realtimeCount || 0);
+          }
         }
       } catch (e: any) {
         if (!cancelled && id === reqId.current) setErr(e?.message || '加载失败');
@@ -156,10 +167,10 @@ export default function StockChart({
         <div className="muted" style={{ padding: '40px 0', textAlign: 'center' }}>{err}</div>
       )}
       {dataLen > 0 && isIntraday && (
-        <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} zoom={zoom} livePrice={livePrice} {...vb} />
+        <IntradayView data={intraday} prevClose={prevClose} five={period === '五日'} zoom={zoom} livePrice={livePrice} asOf={asOf} {...vb} />
       )}
       {dataLen > 0 && !isIntraday && (
-        <KlineView data={kline} period={period} minuteSpan={minuteSpan} onMinuteSpan={setMinuteSpan} zoom={zoom} {...vb} />
+        <KlineView data={kline} period={period} minuteSpan={minuteSpan} onMinuteSpan={setMinuteSpan} zoom={zoom} asOf={asOf} realtimeCount={realtimeCount} {...vb} />
       )}
     </div>
   );
@@ -171,6 +182,7 @@ function IntradayView({
   five,
   zoom,
   livePrice,
+  asOf,
   large = false,
   boxW = 0,
   boxH = 320,
@@ -180,6 +192,7 @@ function IntradayView({
   five: boolean;
   zoom: number;
   livePrice?: number;
+  asOf?: string | null;
   large?: boolean;
   boxW?: number;
   boxH?: number;
@@ -197,27 +210,48 @@ function IntradayView({
   const plotW = padL + innerW + padR;
   // 末点用实时价覆盖，保证分时图"最新"与卡片现价完全一致（消除两者价差误导）
   const lastPrice = livePrice != null && Number.isFinite(livePrice) ? livePrice : data[n - 1].price;
-  const closes = data.map((d, i) => (i === n - 1 ? lastPrice : d.price));
-  const avgs = data.map((d) => d.avg).filter((v) => Number.isFinite(v));
-  let lo = Math.min(...closes, ...avgs);
-  let hi = Math.max(...closes, ...avgs);
-  if (Number.isFinite(prevClose as number)) {
-    lo = Math.min(lo, prevClose as number);
-    hi = Math.max(hi, prevClose as number);
+  const closes = data.map((d, i) =>
+    i === n - 1 ? lastPrice : (Number.isFinite(d.price) && d.price > 0 ? d.price : lastPrice),
+  );
+  // 防御式 Y 轴：只基于「有效价格 + 有效昨收」计算范围。
+  // 指数类标的（100.UDI 美元指数等）的均价为 0/null、成交量全为 0 —— 那是「无此字段」，
+  // 不是真实值。旧逻辑用 Number.isFinite 过滤均价时没排除 0，lo 被拉到 0，
+  // 101.x 的价格曲线被压缩在顶部一条水平线，看起来就是「分时/五日一直不动」。
+  const priceVals = closes.filter((v) => Number.isFinite(v) && v > 0);
+  if (!priceVals.length) priceVals.push(1);
+  const prevOk = Number.isFinite(prevClose as number) && (prevClose as number) > 0;
+  let lo = Infinity, hi = -Infinity;
+  for (const v of priceVals) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  if (prevOk) { lo = Math.min(lo, prevClose as number); hi = Math.max(hi, prevClose as number); }
+  // 有效均价：正数、有限，且与价格处于同一量级（容忍多日大幅波动，但挡住 0 / 异常值）
+  const loBase = lo, hiBase = hi;
+  const band = Math.max(hiBase - loBase, Math.abs(hiBase) * 0.01, 0.01);
+  const avgOk = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 &&
+    v >= loBase - band * 2 && v <= hiBase + band * 2;
+  // 均价线要么整段有效才画，否则完全不画（避免把 0 点连成图底一条假线）
+  const hasAvgLine = n > 0 && data.every((d) => avgOk(d.avg));
+  if (hasAvgLine) {
+    for (const d of data) { const v = d.avg as number; if (v < lo) lo = v; if (v > hi) hi = v; }
   }
   if (lo === hi) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
   const span = hi - lo || 1;
   const xOf = (i: number) => padL + i * slot + slot / 2;
   const yOf = (v: number) => padT + priceH - ((v - lo) / span) * priceH;
-  const hasPrev = Number.isFinite(prevClose as number);
-  const ref = hasPrev ? (prevClose as number) : data[0].price;
+  const hasPrev = prevOk;
+  const ref = hasPrev
+    ? (prevClose as number)
+    : (Number.isFinite(data[0].price) && data[0].price > 0 ? data[0].price : priceVals[0]);
   const up = lastPrice >= ref;
   const stroke = up ? C.up : C.down;
   const pricePts = closes.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ');
-  const avgPts = data.map((d, i) => `${xOf(i).toFixed(1)},${yOf(d.avg).toFixed(1)}`).join(' ');
-  const volMax = Math.max(...data.map((d) => d.vol), 1);
-  const yVol = (v: number) => padT + priceH + gap + volH - (v / volMax) * volH;
+  const avgPts = hasAvgLine
+    ? data.map((d, i) => `${xOf(i).toFixed(1)},${yOf(d.avg as number).toFixed(1)}`).join(' ')
+    : '';
+  const volMax = data.reduce((m, d) => Math.max(m, Number.isFinite(d.vol) ? d.vol : 0), 0);
+  const hasVolume = volMax > 0;
+  const yVol = (v: number) => padT + priceH + gap + volH - (v / (volMax || 1)) * volH;
   const pct = (v: number) => ((v - ref) / ref) * 100;
   const ticks = [0, 0.5, 1].map((k) => lo + span * k);
   const stepX = Math.max(1, Math.ceil(n / 8));
@@ -253,7 +287,7 @@ function IntradayView({
           <line x1={padL} y1={yOf(ref)} x2={padL + innerW} y2={yOf(ref)} stroke={C.textDim} strokeWidth={1} strokeDasharray="5 3" />
         )}
         <polygon points={`${padL},${padT + priceH} ${pricePts} ${padL + innerW},${padT + priceH}`} fill="url(#intradayGrad)" />
-        <polyline points={avgPts} fill="none" stroke={C.avg} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        {hasAvgLine && <polyline points={avgPts} fill="none" stroke={C.avg} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
         <polyline
           points={pricePts}
           fill="none"
@@ -264,7 +298,7 @@ function IntradayView({
           strokeLinecap="round"
         />
         <circle cx={xOf(n - 1)} cy={yOf(lastPrice)} r={3} fill={stroke} />
-        {data.map((d, i) => {
+        {hasVolume && data.map((d, i) => {
           const bw = Math.max(0.5, slot * 0.62);
           const y = yVol(d.vol);
           const h = padT + priceH + gap + volH - y;
@@ -278,9 +312,12 @@ function IntradayView({
       </svg>
       </div>
       <div className="chart-legend">
-        <span><i style={{ background: C.avg }} />均价 {fmt(data[n - 1].avg)}</span>
+        {hasAvgLine
+          ? <span><i style={{ background: C.avg }} />均价 {fmt(data[n - 1].avg)}</span>
+          : hasPrev && <span className="muted">昨收 {fmt(ref)}</span>}
         <span style={{ color: stroke, fontWeight: 700 }}>最新 {fmt(lastPrice)}</span>
         {hasPrev && <span style={{ color: stroke }}>{up ? '▲' : '▼'} {pct(lastPrice).toFixed(2)}%</span>}
+        {asOf && <span className="muted">数据截至 {asOf.slice(11, 16)}</span>}
       </div>
     </div>
   );
@@ -292,6 +329,8 @@ interface KlineProps {
   minuteSpan?: 'recent' | 'all';
   onMinuteSpan?: (v: 'recent' | 'all') => void;
   zoom: number;
+  asOf?: string | null;
+  realtimeCount?: number;
   large?: boolean;
   boxW?: number;
   boxH?: number;
@@ -302,6 +341,8 @@ function KlineView({
   minuteSpan = 'recent',
   onMinuteSpan,
   zoom,
+  asOf,
+  realtimeCount = 0,
   large = false,
   boxW = 0,
   boxH = 320,
@@ -369,6 +410,8 @@ function KlineView({
         <div className="minute-switch" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <span className="muted" style={{ fontSize: 11 }}>
             {showAll ? `1分钟走势 · 全天（共 ${n} 根，可滑动）` : `1分钟走势 · 最近 ${n} 分钟（共 ${n} 根，可滑动）`}
+            {asOf ? ` · 数据截至 ${asOf.slice(11, 16)}` : ''}
+            {realtimeCount > 0 ? ` · 末端实时补点 ${realtimeCount} 根` : ''}
           </span>
           <span style={{ flex: 1 }} />
           <button className={!showAll ? 'seg on' : 'seg'} onClick={() => onMinuteSpan?.('recent')}>近30分钟</button>
@@ -393,10 +436,12 @@ function KlineView({
             const col = isUp ? C.up : C.down;
             const top = Math.min(yO, yC);
             const h = Math.max(1, Math.abs(yC - yO));
+            // 实时补点段用虚线 + 半透明区分：它不是东财历史 bar，是新浪快照自采的
+            const rt = !!d.realtime;
             return (
-              <g key={i}>
-                <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={1} />
-                <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={col} />
+              <g key={i} opacity={rt ? 0.8 : 1}>
+                <line x1={x} y1={yH} x2={x} y2={yL} stroke={col} strokeWidth={1} strokeDasharray={rt ? '2 2' : undefined} />
+                <rect x={x - candleW / 2} y={top} width={candleW} height={h} fill={col} fillOpacity={rt ? 0.55 : 1} />
               </g>
             );
           })}
@@ -419,6 +464,8 @@ function KlineView({
         <span style={{ color: C.ma5 }}>MA5 {maLast(ma5v) != null ? fmt(maLast(ma5v) as number) : '—'}</span>
         <span style={{ color: C.ma10 }}>MA10 {maLast(ma10v) != null ? fmt(maLast(ma10v) as number) : '—'}</span>
         <span style={{ color: C.ma20 }}>MA20 {maLast(ma20v) != null ? fmt(maLast(ma20v) as number) : '—'}</span>
+        {!isMinute && asOf && <span className="muted">数据截至 {asOf.slice(11, 16)}</span>}
+        {realtimeCount > 0 && <span className="muted">虚线=实时补点</span>}
         <span className="muted">（蜡烛图：涨红跌绿）</span>
       </div>
     </div>
