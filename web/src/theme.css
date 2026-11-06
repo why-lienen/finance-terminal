@@ -239,7 +239,10 @@ button.danger:hover { background: var(--up); color: #fff; }
 .table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
 
 /* ===== 专属盯盘终端 ===== */
-.term-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+/* 搜索栏整体抬升为独立层叠上下文：其内部的搜索下拉(absolute) 需稳定盖在下方的监控卡片之上，
+   否则会被 .board 的 .mcard(position:relative) 压在后面，导致下拉项点不到（点中卡片反而打开详情）。
+   z-index 取 40：高于 .board(auto/0)，但低于详情弹窗 modal(z-index:50)，不挡弹窗。 */
+.term-bar { position: relative; z-index: 40; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
 .term-search { flex: 1; min-width: 260px; margin-bottom: 0; }
 
 .board {
