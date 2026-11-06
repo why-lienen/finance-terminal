@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
+import { useEvents } from '../hooks';
+import { AnnouncementBar, EventToasts } from '../components/AnnouncementBar';
 import { isSoundEnabled, setSoundEnabled } from '../alertAudio';
 
 function Clock() {
@@ -47,6 +49,9 @@ export default function Layout() {
     if (shell && shell.setTransparent) shell.setTransparent(next); // 再通知主进程（失败也不影响本次切换）
   };
 
+  // 公告栏：轮询东方财富财经日历，发现新事件弹 Toast（金十式 push）
+  const { events, toasts, dismissToast } = useEvents();
+
   return (
     <div className="app">
       {/* 左边缘拖拽条：不随页面滚动，滚到任何位置都能抓住窗口左缘平移；只占左侧 10px 空白 padding，不挡卡片 / 按钮 / 输入。
@@ -86,9 +91,11 @@ export default function Layout() {
           <Clock />
         </div>
       </header>
+      <AnnouncementBar events={events} />
       <main className="content">
         <Outlet />
       </main>
+      <EventToasts toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

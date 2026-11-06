@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMonitor } from './api/market';
+import { fetchEvents, type MarketEvent, type EventToast } from './api/events';
+import { saveSeenEvents } from './store/events';
 import type { Gold, Stock } from './types';
 import { loadAlerts, pushAlertLog } from './store/alerts';
 import { playAlertSound } from './alertAudio';
@@ -201,4 +203,60 @@ export function useRealtimeMonitor(
   }, [tick, intervalMs]);
 
   return { gold, stocks, series, triggered, loading, error, lastUpdate, toasts, dismissToast };
+}
+
+// 公告栏：轮询东方财富财经日历，发现「新出现的事件」弹 Toast 提示（金十式 push）。
+// 首次拉取只标记已见、不弹窗，避免一次性把所有既有事件都弹出来刷屏。
+// 已见事件 ID 持久化（见 store/events），重启后也不会把老事件当新事件再弹。
+export function useEvents(intervalMs = 60000): {
+  events: MarketEvent[];
+  toasts: EventToast[];
+  dismissToast: (id: string) => void;
+} {
+  const [events, setEvents] = useState<MarketEvent[]>([]);
+  const [toasts, setToasts] = useState<EventToast[]>([]);
+  const seenRef = useRef<Set<string> | null>(null); // null = 尚未完成首次拉取
+
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      const list = await fetchEvents();
+      if (!alive) return;
+      setEvents(list);
+      const seen = seenRef.current;
+      if (seen === null) {
+        // 首次：仅标记已见，不弹窗
+        seenRef.current = new Set(list.map((e) => e.id));
+        saveSeenEvents(seenRef.current);
+        return;
+      }
+      const fresh = list.filter((e) => !seen.has(e.id));
+      if (fresh.length) {
+        fresh.forEach((e) => seen.add(e.id));
+        saveSeenEvents(seen);
+        const items = fresh.slice(0, 5).map((e) => ({
+          id: e.id,
+          title: e.title,
+          region: e.region,
+          time: e.time,
+        }));
+        setToasts((t) => [...t, ...items]);
+        setTimeout(() => {
+          setToasts((t) => t.filter((x) => !items.some((i) => i.id === x.id)));
+        }, 9000);
+      }
+    };
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [intervalMs]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
+  }, []);
+
+  return { events, toasts, dismissToast };
 }

@@ -16,6 +16,53 @@ function send(res, status, data) {
   res.end(body);
 }
 
+// ===== 公告栏数据源：东方财富财经日历（全球央行决议 / 经济数据 / 重大会议），免 key，服务端代理掉 CORS =====
+// 取「今天 ~ +14 天」即将到来的事件，按时间升序；FE_CODE 为稳定唯一 id，供前端去重 / 新事件提示。
+// 轻量缓存 3 分钟：前端每 1 分钟轮询，实际打向东财的频率降到每 3 分钟一次。
+const EVENTS_TTL = 3 * 60 * 1000;
+let eventsCache = { at: 0, data: [] };
+function fmtLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+async function fetchEvents() {
+  const now = Date.now();
+  if (eventsCache.data.length && now - eventsCache.at < EVENTS_TTL) return eventsCache.data;
+  const today = new Date();
+  const end = new Date(today.getTime() + 14 * 86400000);
+  const url =
+    'https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_CPH_FECALENDAR' +
+    '&columns=ALL&pageSize=80&sortColumns=START_DATE&sortTypes=1' +
+    `&filter=(START_DATE>='${fmtLocal(today)}')(START_DATE<='${fmtLocal(end)}')` +
+    '&source=WEB&client=WEB';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const j = await r.json();
+    const list = (j && j.result && j.result.data) || [];
+    const events = list
+      .map((e) => ({
+        id: String(e.FE_CODE),
+        time: (e.START_DATE || '').slice(0, 16),
+        title: e.FE_NAME || '',
+        region: e.CITY || '',
+        type: e.FE_TYPE || '',
+        importance: e.STD_TYPE_CODE ? Number(e.STD_TYPE_CODE) : 0,
+        desc: e.CONTENT || '',
+      }))
+      .filter((e) => e.title && e.id);
+    eventsCache = { at: now, data: events };
+    return events;
+  } catch (e) {
+    return eventsCache.data; // 失败时回退到上次缓存（若有）
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
 
@@ -30,6 +77,11 @@ async function handler(req, res) {
 
   try {
     if (path === '/api/health') return send(res, 200, { ok: true });
+
+    // 公告栏：东方财富财经日历（全球重大事件），前端轮询此接口，发现新事件即弹 Toast 提示
+    if (path === '/api/events') {
+      return send(res, 200, { events: await fetchEvents() });
+    }
 
     // 诊断：新浪实时补点源的状态（末端时间 / bar 数 / 与本地时间差），便于自测回归
     if (path === '/api/market/realtime/status') {
