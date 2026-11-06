@@ -16,44 +16,67 @@ function send(res, status, data) {
   res.end(body);
 }
 
-// ===== 公告栏数据源：东方财富财经日历（全球央行决议 / 经济数据 / 重大会议），免 key，服务端代理掉 CORS =====
-// 取「今天 ~ +14 天」即将到来的事件，按时间升序；FE_CODE 为稳定唯一 id，供前端去重 / 新事件提示。
-// 轻量缓存 3 分钟：前端每 1 分钟轮询，实际打向东财的频率降到每 3 分钟一次。
-const EVENTS_TTL = 3 * 60 * 1000;
+// ===== 公告栏数据源：新浪 7x24 财经快讯（实时突发快讯，免 key，服务端代理掉 CORS） =====
+// 金十式「每次出现都会提示」的体验：拉取最新快讯，过滤出国际 / 黄金相关，按发布时间倒序返回。
+// 新浪返回真实发布时间戳（intime，epoch 秒），不再有 00:00 假时间；docid 为稳定唯一 id，供前端去重。
+// 轻量缓存 1 分钟：前端每 60s 轮询，实际打向新浪的频率降到每分钟一次。
+const EVENTS_TTL = 60 * 1000;
 let eventsCache = { at: 0, data: [] };
-function fmtLocal(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+
+// 国际 / 黄金相关关键词：命中其一即保留（覆盖黄金本身，以及影响金价的国际宏观——美联储/美元/地缘/非农/原油/美股等）
+const KW_GOLD = ['黄金', '金价', '伦敦金', '现货黄金', '白银', '金ETF', '黄金ETF', 'comex'];
+const KW_INTL = [
+  '美联储', '美元', '央行', '地缘', '伊朗', '中东', '霍尔木兹', '非农', '原油', '避险',
+  '关税', '美股', '美债', '特朗普', '大选', '加息', '降息', 'CPI', 'PCE', 'GDP', '零售',
+  '初请', '储备', '战争', '制裁', '汇率', '贵金属',
+];
+const EVENT_KEYWORDS = [...KW_GOLD, ...KW_INTL];
+function eventImportance(text) {
+  if (KW_GOLD.some((k) => text.includes(k))) return 2; // 黄金直接相关 → 红点
+  return 1; // 国际宏观 → 琥珀点
 }
+function isRelevant(text) {
+  return EVENT_KEYWORDS.some((k) => text.toLowerCase().includes(k.toLowerCase()));
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+
 async function fetchEvents() {
   const now = Date.now();
   if (eventsCache.data.length && now - eventsCache.at < EVENTS_TTL) return eventsCache.data;
-  const today = new Date();
-  const end = new Date(today.getTime() + 14 * 86400000);
-  const url =
-    'https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_CPH_FECALENDAR' +
-    '&columns=ALL&pageSize=80&sortColumns=START_DATE&sortTypes=1' +
-    `&filter=(START_DATE>='${fmtLocal(today)}')(START_DATE<='${fmtLocal(end)}')` +
-    '&source=WEB&client=WEB';
+  const url = 'https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&k=&num=60&page=1';
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn/' },
+    });
     const j = await r.json();
     const list = (j && j.result && j.result.data) || [];
-    const events = list
-      .map((e) => ({
-        id: String(e.FE_CODE),
-        time: (e.START_DATE || '').slice(0, 16),
-        title: e.FE_NAME || '',
-        region: e.CITY || '',
-        type: e.FE_TYPE || '',
-        importance: e.STD_TYPE_CODE ? Number(e.STD_TYPE_CODE) : 0,
-        desc: e.CONTENT || '',
-      }))
-      .filter((e) => e.title && e.id);
+    const seen = new Set();
+    const events = [];
+    for (const it of list) {
+      const raw = (it.title || '').trim() || (it.intro || '').trim();
+      if (!raw) continue;
+      if (!isRelevant(raw)) continue; // 仅保留国际 / 黄金相关
+      const t = parseInt(it.intime || it.ctime || '0', 10);
+      if (!t) continue;
+      const id = String(it.docid || it.url || raw + '_' + t);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const d = new Date(t * 1000);
+      const time = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      events.push({
+        id,
+        time,
+        title: raw,
+        region: '',
+        type: '',
+        importance: eventImportance(raw),
+        desc: raw,
+      });
+    }
+    events.sort((a, b) => b.time.localeCompare(a.time)); // 最新在前
     eventsCache = { at: now, data: events };
     return events;
   } catch (e) {
@@ -78,7 +101,7 @@ async function handler(req, res) {
   try {
     if (path === '/api/health') return send(res, 200, { ok: true });
 
-    // 公告栏：东方财富财经日历（全球重大事件），前端轮询此接口，发现新事件即弹 Toast 提示
+    // 公告栏：新浪 7x24 财经快讯（国际 / 黄金相关实时突发快讯），前端轮询此接口，发现新事件即弹 Toast 提示
     if (path === '/api/events') {
       return send(res, 200, { events: await fetchEvents() });
     }

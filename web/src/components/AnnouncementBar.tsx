@@ -2,24 +2,23 @@ import { useState } from 'react';
 import type { MarketEvent, EventToast } from '../api/events';
 
 function impClass(i: number) {
-  if (i >= 2) return 'ab-imp hi'; // 较高重要度（经济数据等）
-  if (i === 1) return 'ab-imp mid';
+  if (i >= 2) return 'ab-imp hi'; // 黄金直接相关 → 红点
+  if (i === 1) return 'ab-imp mid'; // 国际宏观 → 琥珀点
   return 'ab-imp';
 }
 
-// 顶部常驻公告栏：展示未来 14 天内的全球重大事件（央行决议 / 经济数据 / 重大会议）
+// 顶部常驻公告栏：展示国际 / 黄金相关的实时突发快讯（新浪 7x24，已按关键词过滤）
 export function AnnouncementBar({ events }: { events: MarketEvent[] }) {
   const [open, setOpen] = useState(true);
   return (
     <div className="announce-bar">
-      <span className="ab-label">📰 重大事件</span>
-      {events.length === 0 && <span className="ab-empty">暂无即将到来的重大事件</span>}
+      <span className="ab-label">📰 国际快讯</span>
+      {events.length === 0 && <span className="ab-empty">暂无国际 / 黄金相关快讯</span>}
       {open &&
         events.map((e) => (
           <span className="ab-item" key={e.id} title={e.desc || e.title}>
             <span className={impClass(e.importance)} />
-            <span className="ab-time">{e.time.slice(5, 16)}</span>
-            {e.region && <span className="ab-region">{e.region}</span>}
+            <span className="ab-time">{e.time}</span>
             <span>{e.title}</span>
           </span>
         ))}
@@ -45,7 +44,7 @@ export function EventToasts({
         <div className="etoast" key={t.id} onClick={() => onDismiss(t.id)}>
           <div className="et-title">📰 {t.title}</div>
           <div className="et-meta">
-            {t.region ? t.region + ' · ' : ''}
+            {t.region ? t.region + ' · ' : '国际 · '}
             {t.time}
           </div>
         </div>
