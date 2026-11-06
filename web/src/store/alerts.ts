@@ -1,4 +1,6 @@
 // 预警规则 + 触发日志（仅存本地，专属/私密）
+import { mirrorToDisk } from './db';
+
 export interface AlertRule {
   upper?: number; // 价格 >= upper 触发（突破上限）
   lower?: number; // 价格 <= lower 触发（跌破下限）
@@ -29,6 +31,7 @@ export function loadAlerts(): Record<string, AlertRule> {
 
 export function saveAlerts(a: Record<string, AlertRule>) {
   localStorage.setItem(KEY, JSON.stringify(a));
+  mirrorToDisk(KEY, a);
 }
 
 export function getAlert(symbol: string): AlertRule | undefined {
@@ -61,4 +64,5 @@ export function pushAlertLog(e: AlertLogEntry) {
   list.unshift(e);
   if (list.length > 5) list.length = 5; // 只保留最近 5 条触发记录，避免无限增长
   localStorage.setItem(LOG_KEY, JSON.stringify(list));
+  mirrorToDisk(LOG_KEY, list);
 }

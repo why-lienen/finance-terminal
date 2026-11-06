@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('appShell', {
   openChart: (payload) => ipcRenderer.send('app:chart', payload),
   setTransparent: (v) => ipcRenderer.send('app:set-transparent', v),
   onTransparency: (cb) => { transparencyCb = cb; },
+  // 磁盘持久化（跨来源/端口稳定）：key-value 落在 userData/app-data.json，不再依赖 localStorage 的来源隔离
+  dbGet: (key) => ipcRenderer.invoke('db:get', key),
+  dbSet: (key, value) => ipcRenderer.invoke('db:set', key, value),
 });
 
 window.addEventListener('DOMContentLoaded', () => {

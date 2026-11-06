@@ -39,6 +39,20 @@ function loadUiState() {
 function saveUiState() {
   try { fs.writeFileSync(STATE_FILE, JSON.stringify(uiState)); } catch (_) {}
 }
+
+// 业务数据持久化（自选股 / 预警 / 触发记录 / 持仓）：落在 userData/app-data.json。
+// 之所以不在渲染进程直接用 localStorage：localStorage 按「来源(origin)」隔离，而本 app 加载地址会在
+// Vite(localhost:5173) 与 内置服务(127.0.0.1:端口) 间切换，端口被占用还会随机分配 →
+// 来源一变旧数据就读不到。统一走磁盘文件，与加载地址彻底解耦，重启不再丢数据。
+const DATA_FILE = path.join(app.getPath('userData'), 'app-data.json');
+let appData = {};
+try {
+  const d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  if (d && typeof d === 'object') appData = d;
+} catch (_) {}
+function saveAppData() {
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(appData)); } catch (_) {}
+}
 // 在渲染进程里切换 body 的 transparent-bg 类（窗口本身 transparent:true，靠内容背景决定透不透明）
 // ⚠️ macOS 已知坑：transparent:true 窗口在「内容 alpha 变化」后，Chromium 合成层不会主动重建，
 // 会残留上一帧的不透明白板；Electron 官方文档也提示「透明窗口设 resizable:true 可能让透明失效」，
@@ -286,6 +300,13 @@ app.whenReady().then(async () => {
   ipcMain.on('app:float-close', (e) => {
     const w = BrowserWindow.fromWebContents(e.sender);
     if (w) w.close();
+  });
+  // 磁盘持久化（跨来源稳定）：渲染进程把 localStorage 镜像到这里，启动时再回填，避免「换端口/换源清空记录」
+  ipcMain.handle('db:get', (_e, key) => (key in appData ? appData[key] : null));
+  ipcMain.handle('db:set', (_e, key, value) => {
+    appData[key] = value;
+    saveAppData();
+    return true;
   });
 
   try {

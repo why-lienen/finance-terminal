@@ -1,4 +1,5 @@
 import type { Holding, WatchItem } from '../types';
+import { mirrorToDisk } from './db';
 
 const H_KEY = 'ft_holdings_v1';
 const W_KEY = 'ft_watchlist_v1';
@@ -14,6 +15,7 @@ export function loadHoldings(): Holding[] {
 
 export function saveHoldings(h: Holding[]) {
   localStorage.setItem(H_KEY, JSON.stringify(h));
+  mirrorToDisk(H_KEY, h);
 }
 
 export function loadWatch(): WatchItem[] {
@@ -27,6 +29,7 @@ export function loadWatch(): WatchItem[] {
 
 export function saveWatch(w: WatchItem[]) {
   localStorage.setItem(W_KEY, JSON.stringify(w));
+  mirrorToDisk(W_KEY, w);
 }
 
 export function upsertHolding(h: Holding) {
