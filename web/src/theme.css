@@ -306,29 +306,38 @@ button.danger:hover { background: var(--up); color: #fff; }
 @keyframes slidein { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ===== 菜单栏 app 模式（Electron，body 带 .electron-app）=====
-   整窗可拖动：body 设为 drag，窗口内「任意空白处」按住都能平移整个窗口。
-   Electron 命中测试会沿祖先链找最近的 -webkit-app-region 声明，因此只要把
-   「需要点击 / 输入 / 滚动 / 选中」的元素单独标为 no-drag，其余空白处自动可拖。
-   注意：drag 区域会吞掉点击与文本选择，所以下列排除项必须齐全。 */
-.electron-app { -webkit-app-region: drag; }
+   拖动 vs 滚动的取舍（方案 A，标准桌面软件做法）：
+   - 之前为支持「点内容任意空白都能拖整窗」，把整篇 .app 标成 drag，结果右边缘拖拽条直接
+     压在竖向滚动条上、滚轮被整窗拖动吞掉，表现为「下滑时灵时不灵」。
+   - 现改为：body / .app / 内容区 全部 no-drag（不吞任何交互），只保留「顶栏 + 左边缘条」可拖。
+     顶栏是整条 56px、滚动后始终钉在顶部可见，所以「滑下去照样能拖」同样满足。
+   - 右边缘拖拽条已删除：它正好压在竖向滚动条上，是滚动失灵的直接元凶。 */
+.electron-app { -webkit-app-region: no-drag; }
 
-/* ⚠️ 修复「滑到页面下面就拉不动窗口」：
-   html/body/#root 是 height:100%，body 的布局盒只有一屏高，而 .app 会随内容撑到整篇文档
-   （实测 500×720 视口：body 高 705，.app 高 947）。Electron 的 draggable region 按元素布局
-   矩形生成，文档滚动后溢出的内容不在 body 的 region 内，于是下面点哪都拖不动。
-   给 .app 显式声明 drag（它的盒覆盖整篇文档）+ 下面两条固定边缘拖拽条，双保险覆盖滚动后的区域。 */
-.electron-app .app { -webkit-app-region: drag; }
+/* .app 固定一屏高，内部由 .content 自己滚动：文档级不滚动，滚动条归 .content 所有且不受 drag 干扰 */
+.electron-app .app {
+  -webkit-app-region: no-drag;
+  height: 100vh;
+  overflow: hidden;
+}
+/* 主拖动手柄：整条顶栏，滚动后始终钉在顶部可见 */
 .electron-app .topbar { -webkit-app-region: drag; }
 
-/* 固定边缘拖拽条：position:fixed 不随页面滚动移动，region 永远稳定；
-   只占窗口左右各 10px 的 padding 空白区，不挡卡片 / 按钮 / 输入框 / Toast。 */
+/* 左边缘拖拽条：position:fixed 不随滚动移动，永远可抓；只占左侧 10px 空白 padding，不挡卡片 / 按钮。
+   右边缘条已删除（它压在竖向滚动条上导致滚动失灵）。 */
 .electron-app .drag-rail {
   position: fixed; top: 56px; bottom: 0; width: 10px;
   z-index: 90; background: transparent; cursor: grab;
   -webkit-app-region: drag;
 }
 .electron-app .drag-rail-l { left: 0; }
-.electron-app .drag-rail-r { right: 0; }
+
+/* 内容区：独立滚动容器，no-drag → 滚轮与滚动条完全正常，不再被整窗拖动吞掉 */
+.electron-app .content {
+  -webkit-app-region: no-drag;
+  min-height: 0;
+  overflow-y: auto;
+}
 
 .electron-app button,
 .electron-app input,
